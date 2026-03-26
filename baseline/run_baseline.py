@@ -42,6 +42,7 @@ Never output free text inside enum fields.
 """.strip()
 
 logger = logging.getLogger(__name__)
+RUNTIME_STATS = {"api_failures": 0, "fallback_actions": 0}
 
 
 class BaselineDecision(BaseModel):
@@ -234,7 +235,8 @@ def action_from_payload(payload: dict[str, Any], observation: Observation) -> Ac
         return Action(**payload)
     except ValidationError:
         fallback_payload = build_safe_default_payload(observation)
-        logger.warning("action_validation_failed payload=%s fallback=%s", payload, fallback_payload)
+        RUNTIME_STATS["fallback_actions"] += 1
+        logger.error("action_validation_failed payload=%s fallback=%s", payload, fallback_payload)
         return Action(**fallback_payload)
 
 
@@ -256,25 +258,34 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
                     "content": observation.model_dump_json(indent=2),
                 },
             ],
-            text={
-                "type": "json_schema",
-                "name": "baseline_decision",
-                "schema": BaselineDecision.model_json_schema(),
-                "strict": True,
-                "description": "Strict JSON action for OpenEnv email triage.",
-            },
         )
-        raw_output = getattr(response, "output_text", "") or ""
+        raw_output = response.output_text or ""
         parsed_payload = extract_json_object(raw_output)
     except Exception as exc:
-        logger.warning("llm_decision_failed error=%s fallback=%s", exc, safe_default)
+        RUNTIME_STATS["api_failures"] += 1
+        RUNTIME_STATS["fallback_actions"] += 1
+        logger.error("llm_request_failed error=%s fallback=%s", exc, safe_default)
+        return Action(**safe_default)
+
+    if parsed_payload is None:
+        RUNTIME_STATS["fallback_actions"] += 1
+        logger.error("llm_response_parse_failed raw_output=%s fallback=%s", raw_output, safe_default)
         return Action(**safe_default)
 
     normalized_payload = normalize_decision_payload(parsed_payload, observation)
     logger.info("llm_raw_output=%s", raw_output)
-    logger.info("llm_parsed_json=%s", parsed_payload if parsed_payload is not None else safe_default)
+    logger.info("llm_parsed_json=%s", parsed_payload)
     logger.info("llm_normalized_decision=%s", normalized_payload)
     return action_from_payload(normalized_payload, observation)
+
+
+def verify_openai_api(client: OpenAI, model: str) -> None:
+    try:
+        response = client.responses.create(model=model, input="ping", temperature=0.0)
+        logger.info("openai_api_healthcheck_ok output=%s", response.output_text)
+    except Exception as exc:
+        logger.error("openai_api_healthcheck_failed error=%s", exc)
+        raise RuntimeError(f"OpenAI Responses API health check failed for model {model}") from exc
 
 
 def run() -> None:
@@ -285,7 +296,14 @@ def run() -> None:
 
     model = os.environ.get("OPENAI_MODEL", "gpt-5.2")
     client = OpenAI(api_key=api_key)
-    results: dict[str, object] = {"model": model, "tasks": [], "average_score": 0.0}
+    verify_openai_api(client, model)
+    results: dict[str, object] = {
+        "model": model,
+        "tasks": [],
+        "average_score": 0.0,
+        "api_failures": 0,
+        "fallback_actions": 0,
+    }
     scores: list[float] = []
 
     for task in get_email_tasks():
@@ -326,6 +344,8 @@ def run() -> None:
         env.close()
 
     results["average_score"] = sum(scores) / len(scores)
+    results["api_failures"] = RUNTIME_STATS["api_failures"]
+    results["fallback_actions"] = RUNTIME_STATS["fallback_actions"]
     output_dir = Path("baseline/results")
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / "baseline_results.json"

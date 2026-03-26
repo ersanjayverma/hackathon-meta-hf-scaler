@@ -16,6 +16,8 @@ MODULE_SPEC.loader.exec_module(baseline_run_baseline)
 choose_action = baseline_run_baseline.choose_action
 extract_json_object = baseline_run_baseline.extract_json_object
 normalize_decision_payload = baseline_run_baseline.normalize_decision_payload
+verify_openai_api = baseline_run_baseline.verify_openai_api
+RUNTIME_STATS = baseline_run_baseline.RUNTIME_STATS
 
 
 class FakeResponse:
@@ -26,8 +28,10 @@ class FakeResponse:
 class FakeResponses:
     def __init__(self, output_text: str | Exception) -> None:
         self.output_text = output_text
+        self.calls: list[dict[str, Any]] = []
 
     def create(self, **_: Any) -> FakeResponse:
+        self.calls.append(_)
         if isinstance(self.output_text, Exception):
             raise self.output_text
         return FakeResponse(self.output_text)
@@ -36,6 +40,11 @@ class FakeResponses:
 class FakeClient:
     def __init__(self, output_text: str | Exception) -> None:
         self.responses = FakeResponses(output_text)
+
+
+def reset_runtime_stats() -> None:
+    RUNTIME_STATS["api_failures"] = 0
+    RUNTIME_STATS["fallback_actions"] = 0
 
 
 def test_extract_json_object_from_markdown_fence() -> None:
@@ -60,15 +69,23 @@ def test_normalize_decision_payload_maps_invalid_values() -> None:
 
 
 def test_choose_action_falls_back_for_non_json_output() -> None:
+    reset_runtime_stats()
     task = get_email_tasks()[0]
 
+    client = FakeClient("I think this is urgent and needs help immediately.")
     observation = EmailTriageEnv(task=task, seed=task.seed).reset()
-    action = choose_action(FakeClient("I think this is urgent and needs help immediately."), observation, model="test")
+    action = choose_action(client, observation, model="test")
     assert action.action_type == "ignore"
     assert action.email_id == observation.inbox[0].email_id
+    assert "text" not in client.responses.calls[0]
+    assert client.responses.calls[0]["input"][0]["role"] == "system"
+    assert client.responses.calls[0]["input"][1]["role"] == "user"
+    assert RUNTIME_STATS["fallback_actions"] == 1
+    assert RUNTIME_STATS["api_failures"] == 0
 
 
 def test_choose_action_normalizes_invalid_template_and_priority() -> None:
+    reset_runtime_stats()
     task = get_email_tasks()[1]
 
     observation = EmailTriageEnv(task=task, seed=task.seed).reset()
@@ -82,3 +99,20 @@ def test_choose_action_normalizes_invalid_template_and_priority() -> None:
     )
     assert action.action_type == "ignore"
     assert action.email_id == observation.inbox[0].email_id
+    assert RUNTIME_STATS["fallback_actions"] == 0
+
+
+def test_verify_openai_api_uses_ping() -> None:
+    client = FakeClient("pong")
+    verify_openai_api(client, model="test")
+    assert client.responses.calls[0]["input"] == "ping"
+
+
+def test_choose_action_counts_api_failures() -> None:
+    reset_runtime_stats()
+    task = get_email_tasks()[0]
+    observation = EmailTriageEnv(task=task, seed=task.seed).reset()
+    action = choose_action(FakeClient(RuntimeError("boom")), observation, model="test")
+    assert action.action_type == "ignore"
+    assert RUNTIME_STATS["api_failures"] == 1
+    assert RUNTIME_STATS["fallback_actions"] == 1
