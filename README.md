@@ -1,16 +1,13 @@
+---
 title: OpenEnv Email Triage Benchmark
 emoji: 📬
 colorFrom: blue
 colorTo: green
 sdk: docker
+sdk_version: "0.0.0"
 app_file: app.py
 pinned: false
 app_port: 7860
-tags:
-  - openenv
-  - benchmark
-  - rl
-  - email-triage
 ---
 
 # OpenEnv
