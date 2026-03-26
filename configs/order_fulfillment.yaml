@@ -1,0 +1,27 @@
+episode_length: 40
+warehouse_capacity: 8
+skus:
+  - A
+  - B
+  - C
+initial_inventory:
+  A: 18
+  B: 20
+  C: 16
+reorder_lead_time: 3
+reorder_cost: 0.7
+holding_cost: 0.05
+stockout_penalty: 1.2
+late_penalty: 1.5
+expedite_cost: 0.8
+fulfillment_reward: 4.0
+partial_allocation_reward: 0.3
+order_distribution:
+  arrival_rate: 2.5
+  quantity_low: 1
+  quantity_high: 5
+  priority_levels: 3
+  due_window_low: 2
+  due_window_high: 6
+  delivery_delay_low: 1
+  delivery_delay_high: 3

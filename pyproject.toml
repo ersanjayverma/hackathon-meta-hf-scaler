@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "openenv"
+version = "1.0.0"
+description = "Benchmarkable real-world RL environment framework"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.111",
+  "numpy>=1.26",
+  "openai>=1.0.0",
+  "pydantic>=2.7",
+  "prometheus-client>=0.20",
+  "PyYAML>=6.0",
+  "uvicorn>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+openenv = "openenv.cli:main"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+include = ["openenv*", "agents*", "environments*"]
+exclude = ["tests*", "baseline*", "configs*"]

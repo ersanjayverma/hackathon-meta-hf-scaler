@@ -1,0 +1,10 @@
+fastapi>=0.111
+numpy>=1.26
+openai>=1.0.0
+pydantic>=2.7
+prometheus-client>=0.20
+PyYAML>=6.0
+uvicorn>=0.30
+
+[dev]
+pytest>=8.0
