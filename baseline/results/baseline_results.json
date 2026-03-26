@@ -1,6 +1,7 @@
 {
   "api_failures": 0,
-  "average_score": 0.48333333333333334,
+  "average_score": 0.65,
+  "backend": "openai",
   "fallback_actions": 0,
   "model": "gpt-5.2",
   "tasks": [
@@ -31,7 +32,7 @@
               "completion": 0.1
             },
             "seed": 101,
-            "step_latency": 0.0001733139797579497,
+            "step_latency": 0.00025839300360530615,
             "task_name": "task_easy_classification"
           },
           "reward": {
@@ -69,7 +70,7 @@
               "classification": 0.3
             },
             "seed": 101,
-            "step_latency": 0.00022173498291522264,
+            "step_latency": 0.00020012399181723595,
             "task_name": "task_easy_classification"
           },
           "reward": {
@@ -84,50 +85,95 @@
         },
         {
           "action": {
-            "action_type": "respond",
-            "category": null,
+            "action_type": "classify",
+            "category": "urgent",
             "email_id": "e-002",
-            "priority": "critical",
-            "response_template": "escalate_notice",
+            "priority": null,
+            "response_template": null,
             "schema_version": "1.0.0"
           },
           "info": {
             "action_trace": {
-              "action_type": "respond",
+              "action_type": "classify",
               "email_id": "e-002",
               "schema_version": "1.0.0",
               "step_index": 2,
-              "summary": "respond:e-002:escalate_notice"
+              "summary": "classify:e-002:urgent"
             },
-            "backlog_size": 0,
-            "pending_emails": 0,
-            "resolved_email_id": "e-002",
+            "backlog_size": 1,
+            "loop_detected": true,
+            "pending_emails": 1,
+            "resolved_email_id": null,
             "reward_breakdown": {
-              "completion": 0.1,
-              "response_correctness": -0.25,
-              "timeliness": 0.15
+              "classification": 0.3,
+              "loop_penalty": -0.1,
+              "redundant_action": -0.1
             },
             "seed": 101,
-            "step_latency": 0.00024771300377324224,
+            "step_latency": 0.00015615098527632654,
             "task_name": "task_easy_classification"
           },
           "reward": {
             "components": {
-              "completion": 0.1,
-              "response_correctness": -0.25,
-              "timeliness": 0.15
+              "classification": 0.3,
+              "loop_penalty": -0.1,
+              "redundant_action": -0.1
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": 0.0
+            "total": 0.09999999999999998
           },
           "step": 3
+        },
+        {
+          "action": {
+            "action_type": "classify",
+            "category": "urgent",
+            "email_id": "e-002",
+            "priority": null,
+            "response_template": null,
+            "schema_version": "1.0.0"
+          },
+          "info": {
+            "action_trace": {
+              "action_type": "classify",
+              "email_id": "e-002",
+              "schema_version": "1.0.0",
+              "step_index": 3,
+              "summary": "classify:e-002:urgent"
+            },
+            "backlog_size": 1,
+            "loop_detected": true,
+            "pending_emails": 1,
+            "resolved_email_id": null,
+            "reward_breakdown": {
+              "classification": 0.3,
+              "loop_penalty": -0.1,
+              "missed_response": -0.35,
+              "redundant_action": -0.1
+            },
+            "seed": 101,
+            "step_latency": 0.00016281500575132668,
+            "task_name": "task_easy_classification"
+          },
+          "reward": {
+            "components": {
+              "classification": 0.3,
+              "loop_penalty": -0.1,
+              "missed_response": -0.35,
+              "redundant_action": -0.1
+            },
+            "reason": "dense trajectory-aware reward",
+            "schema_version": "1.0.0",
+            "total": -0.25
+          },
+          "step": 4
         }
       ],
-      "score": 0.9,
+      "score": 1.0,
       "seed": 101,
       "task": "task_easy_classification",
-      "total_reward": 0.7
+      "total_reward": 0.5499999999999999
     },
     {
       "actions": [
@@ -155,7 +201,7 @@
               "escalation": -0.3
             },
             "seed": 202,
-            "step_latency": 0.00026962399715557694,
+            "step_latency": 0.00014010199811309576,
             "task_name": "task_medium_prioritization"
           },
           "reward": {
@@ -167,45 +213,6 @@
             "total": -0.3
           },
           "step": 1
-        },
-        {
-          "action": {
-            "action_type": "ignore",
-            "category": null,
-            "email_id": "e-102",
-            "priority": null,
-            "response_template": null,
-            "schema_version": "1.0.0"
-          },
-          "info": {
-            "action_trace": {
-              "action_type": "ignore",
-              "email_id": "e-102",
-              "schema_version": "1.0.0",
-              "step_index": 1,
-              "summary": "ignore:e-102"
-            },
-            "backlog_size": 2,
-            "pending_emails": 2,
-            "resolved_email_id": "e-102",
-            "reward_breakdown": {
-              "completion": 0.1,
-              "ignore": 0.15
-            },
-            "seed": 202,
-            "step_latency": 0.0002824669936671853,
-            "task_name": "task_medium_prioritization"
-          },
-          "reward": {
-            "components": {
-              "completion": 0.1,
-              "ignore": 0.15
-            },
-            "reason": "dense trajectory-aware reward",
-            "schema_version": "1.0.0",
-            "total": 0.25
-          },
-          "step": 2
         },
         {
           "action": {
@@ -221,73 +228,73 @@
               "action_type": "respond",
               "email_id": "e-103",
               "schema_version": "1.0.0",
-              "step_index": 2,
+              "step_index": 1,
               "summary": "respond:e-103:acknowledge"
             },
-            "backlog_size": 2,
-            "pending_emails": 2,
+            "backlog_size": 3,
+            "pending_emails": 3,
             "resolved_email_id": null,
             "reward_breakdown": {
-              "missed_classification": -0.2,
-              "missed_response": -0.35,
               "response_correctness": -0.25,
               "timeliness": 0.15
             },
             "seed": 202,
-            "step_latency": 0.00018060699221678078,
+            "step_latency": 0.0001572940091136843,
             "task_name": "task_medium_prioritization"
           },
           "reward": {
             "components": {
-              "missed_classification": -0.2,
-              "missed_response": -0.35,
               "response_correctness": -0.25,
               "timeliness": 0.15
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": -0.65
+            "total": -0.1
           },
-          "step": 3
+          "step": 2
         },
         {
           "action": {
-            "action_type": "respond",
+            "action_type": "ignore",
             "category": null,
-            "email_id": "e-101",
-            "priority": "critical",
-            "response_template": "escalate_notice",
+            "email_id": "e-102",
+            "priority": null,
+            "response_template": null,
             "schema_version": "1.0.0"
           },
           "info": {
             "action_trace": {
-              "action_type": "respond",
-              "email_id": "e-101",
+              "action_type": "ignore",
+              "email_id": "e-102",
               "schema_version": "1.0.0",
-              "step_index": 3,
-              "summary": "respond:e-101:escalate_notice"
+              "step_index": 2,
+              "summary": "ignore:e-102"
             },
             "backlog_size": 2,
             "pending_emails": 2,
-            "resolved_email_id": null,
+            "resolved_email_id": "e-102",
             "reward_breakdown": {
-              "missed_classification": -0.4,
-              "response_correctness": -0.25
+              "completion": 0.1,
+              "ignore": 0.15,
+              "missed_classification": -0.2,
+              "missed_response": -0.35
             },
             "seed": 202,
-            "step_latency": 0.0003856009861920029,
+            "step_latency": 0.0002612690150272101,
             "task_name": "task_medium_prioritization"
           },
           "reward": {
             "components": {
-              "missed_classification": -0.4,
-              "response_correctness": -0.25
+              "completion": 0.1,
+              "ignore": 0.15,
+              "missed_classification": -0.2,
+              "missed_response": -0.35
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": -0.65
+            "total": -0.3
           },
-          "step": 4
+          "step": 3
         },
         {
           "action": {
@@ -303,8 +310,51 @@
               "action_type": "respond",
               "email_id": "e-103",
               "schema_version": "1.0.0",
-              "step_index": 4,
+              "step_index": 3,
               "summary": "respond:e-103:resolve"
+            },
+            "backlog_size": 2,
+            "pending_emails": 2,
+            "resolved_email_id": null,
+            "reward_breakdown": {
+              "missed_classification": -0.4,
+              "missed_response": -0.35,
+              "response_correctness": -0.25,
+              "timeliness": 0.15
+            },
+            "seed": 202,
+            "step_latency": 0.00023118199896998703,
+            "task_name": "task_medium_prioritization"
+          },
+          "reward": {
+            "components": {
+              "missed_classification": -0.4,
+              "missed_response": -0.35,
+              "response_correctness": -0.25,
+              "timeliness": 0.15
+            },
+            "reason": "dense trajectory-aware reward",
+            "schema_version": "1.0.0",
+            "total": -0.85
+          },
+          "step": 4
+        },
+        {
+          "action": {
+            "action_type": "respond",
+            "category": null,
+            "email_id": "e-101",
+            "priority": "critical",
+            "response_template": "escalate_notice",
+            "schema_version": "1.0.0"
+          },
+          "info": {
+            "action_trace": {
+              "action_type": "respond",
+              "email_id": "e-101",
+              "schema_version": "1.0.0",
+              "step_index": 4,
+              "summary": "respond:e-101:escalate_notice"
             },
             "backlog_size": 2,
             "pending_emails": 2,
@@ -314,7 +364,7 @@
               "response_correctness": -0.25
             },
             "seed": 202,
-            "step_latency": 0.00022111402358859777,
+            "step_latency": 0.00015605200314894319,
             "task_name": "task_medium_prioritization"
           },
           "reward": {
@@ -352,7 +402,7 @@
               "wait_penalty": -0.05
             },
             "seed": 202,
-            "step_latency": 0.00019135800539515913,
+            "step_latency": 0.00021995100541971624,
             "task_name": "task_medium_prioritization"
           },
           "reward": {
@@ -370,16 +420,53 @@
       "score": 0.4,
       "seed": 202,
       "task": "task_medium_prioritization",
-      "total_reward": -2.45
+      "total_reward": -2.65
     },
     {
       "actions": [
         {
           "action": {
+            "action_type": "classify",
+            "category": "urgent",
+            "email_id": "e-201",
+            "priority": null,
+            "response_template": null,
+            "schema_version": "1.0.0"
+          },
+          "info": {
+            "action_trace": {
+              "action_type": "classify",
+              "email_id": "e-201",
+              "schema_version": "1.0.0",
+              "step_index": 0,
+              "summary": "classify:e-201:urgent"
+            },
+            "backlog_size": 2,
+            "pending_emails": 2,
+            "resolved_email_id": null,
+            "reward_breakdown": {
+              "classification": 0.3
+            },
+            "seed": 303,
+            "step_latency": 0.00014731602277606726,
+            "task_name": "task_hard_thread_reasoning"
+          },
+          "reward": {
+            "components": {
+              "classification": 0.3
+            },
+            "reason": "dense trajectory-aware reward",
+            "schema_version": "1.0.0",
+            "total": 0.3
+          },
+          "step": 1
+        },
+        {
+          "action": {
             "action_type": "respond",
             "category": null,
             "email_id": "e-201",
-            "priority": "high",
+            "priority": "critical",
             "response_template": "request_info",
             "schema_version": "1.0.0"
           },
@@ -388,108 +475,69 @@
               "action_type": "respond",
               "email_id": "e-201",
               "schema_version": "1.0.0",
-              "step_index": 0,
+              "step_index": 1,
               "summary": "respond:e-201:request_info"
             },
             "backlog_size": 2,
             "pending_emails": 2,
-            "resolved_email_id": null,
+            "resolved_email_id": "e-201",
             "reward_breakdown": {
+              "completion": 0.1,
               "response_correctness": -0.25,
               "timeliness": 0.15
             },
             "seed": 303,
-            "step_latency": 0.0002280570042785257,
+            "step_latency": 0.00012005501776002347,
             "task_name": "task_hard_thread_reasoning"
           },
           "reward": {
             "components": {
+              "completion": 0.1,
               "response_correctness": -0.25,
               "timeliness": 0.15
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": -0.1
-          },
-          "step": 1
-        },
-        {
-          "action": {
-            "action_type": "respond",
-            "category": null,
-            "email_id": "e-203",
-            "priority": "low",
-            "response_template": "acknowledge",
-            "schema_version": "1.0.0"
-          },
-          "info": {
-            "action_trace": {
-              "action_type": "respond",
-              "email_id": "e-203",
-              "schema_version": "1.0.0",
-              "step_index": 1,
-              "summary": "respond:e-203:acknowledge"
-            },
-            "backlog_size": 3,
-            "pending_emails": 3,
-            "resolved_email_id": null,
-            "reward_breakdown": {
-              "response_correctness": -0.25,
-              "timeliness": 0.15
-            },
-            "seed": 303,
-            "step_latency": 0.00022767597693018615,
-            "task_name": "task_hard_thread_reasoning"
-          },
-          "reward": {
-            "components": {
-              "response_correctness": -0.25,
-              "timeliness": 0.15
-            },
-            "reason": "dense trajectory-aware reward",
-            "schema_version": "1.0.0",
-            "total": -0.1
+            "total": 0.0
           },
           "step": 2
         },
         {
           "action": {
-            "action_type": "escalate",
+            "action_type": "respond",
             "category": null,
             "email_id": "e-202",
             "priority": "critical",
-            "response_template": null,
+            "response_template": "escalate_notice",
             "schema_version": "1.0.0"
           },
           "info": {
             "action_trace": {
-              "action_type": "escalate",
+              "action_type": "respond",
               "email_id": "e-202",
               "schema_version": "1.0.0",
               "step_index": 2,
-              "summary": "escalate:e-202"
+              "summary": "respond:e-202:escalate_notice"
             },
-            "backlog_size": 3,
-            "pending_emails": 3,
+            "backlog_size": 2,
+            "pending_emails": 2,
             "resolved_email_id": null,
             "reward_breakdown": {
-              "escalation": 0.4,
-              "missed_classification": -0.2,
-              "timeliness": 0.2
+              "response_correctness": 0.35,
+              "timeliness": 0.15
             },
             "seed": 303,
-            "step_latency": 0.00024013998336158693,
+            "step_latency": 0.00017186100012622774,
             "task_name": "task_hard_thread_reasoning"
           },
           "reward": {
             "components": {
-              "escalation": 0.4,
-              "missed_classification": -0.2,
-              "timeliness": 0.2
+              "response_correctness": 0.35,
+              "timeliness": 0.15
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": 0.4
+            "total": 0.5
           },
           "step": 3
         },
@@ -510,118 +558,107 @@
               "step_index": 3,
               "summary": "escalate:e-202"
             },
-            "backlog_size": 3,
-            "loop_detected": true,
-            "pending_emails": 3,
+            "backlog_size": 2,
+            "pending_emails": 2,
             "resolved_email_id": null,
             "reward_breakdown": {
               "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.2,
               "timeliness": 0.2
             },
             "seed": 303,
-            "step_latency": 0.0001496699987910688,
+            "step_latency": 0.00016709300689399242,
             "task_name": "task_hard_thread_reasoning"
           },
           "reward": {
             "components": {
               "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.2,
               "timeliness": 0.2
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": 0.30000000000000004
+            "total": 0.6000000000000001
           },
           "step": 4
         },
         {
           "action": {
-            "action_type": "escalate",
+            "action_type": "respond",
             "category": null,
-            "email_id": "e-202",
-            "priority": "critical",
-            "response_template": null,
+            "email_id": "e-203",
+            "priority": "low",
+            "response_template": "acknowledge",
             "schema_version": "1.0.0"
           },
           "info": {
             "action_trace": {
-              "action_type": "escalate",
-              "email_id": "e-202",
+              "action_type": "respond",
+              "email_id": "e-203",
               "schema_version": "1.0.0",
               "step_index": 4,
-              "summary": "escalate:e-202"
+              "summary": "respond:e-203:acknowledge"
             },
-            "backlog_size": 3,
-            "loop_detected": true,
-            "pending_emails": 3,
+            "backlog_size": 2,
+            "pending_emails": 2,
             "resolved_email_id": null,
             "reward_breakdown": {
-              "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.6000000000000001,
-              "missed_response": -0.35
+              "missed_classification": -0.4,
+              "response_correctness": -0.25,
+              "timeliness": 0.15
             },
             "seed": 303,
-            "step_latency": 0.00017124999430961907,
+            "step_latency": 0.00017348400433547795,
             "task_name": "task_hard_thread_reasoning"
           },
           "reward": {
             "components": {
-              "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.6000000000000001,
-              "missed_response": -0.35
+              "missed_classification": -0.4,
+              "response_correctness": -0.25,
+              "timeliness": 0.15
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": -0.65
+            "total": -0.5
           },
           "step": 5
         },
         {
           "action": {
-            "action_type": "escalate",
+            "action_type": "ignore",
             "category": null,
-            "email_id": "e-202",
-            "priority": "critical",
+            "email_id": "e-203",
+            "priority": null,
             "response_template": null,
             "schema_version": "1.0.0"
           },
           "info": {
             "action_trace": {
-              "action_type": "escalate",
-              "email_id": "e-202",
+              "action_type": "ignore",
+              "email_id": "e-203",
               "schema_version": "1.0.0",
               "step_index": 5,
-              "summary": "escalate:e-202"
+              "summary": "ignore:e-203"
             },
-            "backlog_size": 3,
-            "loop_detected": true,
-            "pending_emails": 3,
-            "resolved_email_id": null,
+            "backlog_size": 1,
+            "pending_emails": 1,
+            "resolved_email_id": "e-203",
             "reward_breakdown": {
-              "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.6000000000000001,
-              "missed_response": -0.35
+              "completion": 0.1,
+              "ignore": -0.25,
+              "missed_classification": -0.2
             },
             "seed": 303,
-            "step_latency": 0.00018557699513621628,
+            "step_latency": 0.00016047002281993628,
             "task_name": "task_hard_thread_reasoning"
           },
           "reward": {
             "components": {
-              "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.6000000000000001,
-              "missed_response": -0.35
+              "completion": 0.1,
+              "ignore": -0.25,
+              "missed_classification": -0.2
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": -0.65
+            "total": -0.35
           },
           "step": 6
         },
@@ -642,38 +679,33 @@
               "step_index": 6,
               "summary": "escalate:e-202"
             },
-            "backlog_size": 3,
-            "loop_detected": true,
-            "pending_emails": 3,
+            "backlog_size": 1,
+            "pending_emails": 1,
             "resolved_email_id": null,
             "reward_breakdown": {
               "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.6000000000000001,
-              "missed_response": -0.35
+              "missed_classification": -0.2
             },
             "seed": 303,
-            "step_latency": 0.00016336500993929803,
+            "step_latency": 0.00023914800840429962,
             "task_name": "task_hard_thread_reasoning"
           },
           "reward": {
             "components": {
               "escalation": 0.4,
-              "loop_penalty": -0.1,
-              "missed_classification": -0.6000000000000001,
-              "missed_response": -0.35
+              "missed_classification": -0.2
             },
             "reason": "dense trajectory-aware reward",
             "schema_version": "1.0.0",
-            "total": -0.65
+            "total": 0.2
           },
           "step": 7
         }
       ],
-      "score": 0.14999999999999997,
+      "score": 0.55,
       "seed": 303,
       "task": "task_hard_thread_reasoning",
-      "total_reward": -1.4500000000000002
+      "total_reward": 0.7500000000000002
     }
   ]
 }

@@ -27,5 +27,5 @@ openenv = "openenv.cli:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["openenv*", "agents*", "environments*"]
-exclude = ["tests*", "baseline*", "configs*"]
+include = ["openenv*", "agents*", "environments*", "baseline*"]
+exclude = ["tests*", "configs*"]

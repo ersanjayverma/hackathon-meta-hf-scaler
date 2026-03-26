@@ -3,6 +3,8 @@ pyproject.toml
 agents/__init__.py
 agents/heuristic_agent.py
 agents/random_agent.py
+baseline/__init__.py
+baseline/run_baseline.py
 environments/__init__.py
 environments/email_triage_env.py
 environments/order_fulfillment_env.py
@@ -25,4 +27,6 @@ openenv.egg-info/dependency_links.txt
 openenv.egg-info/entry_points.txt
 openenv.egg-info/requires.txt
 openenv.egg-info/top_level.txt
+tests/test_app.py
+tests/test_baseline.py
 tests/test_email_triage.py

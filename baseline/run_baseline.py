@@ -9,6 +9,7 @@ from typing import Any, Literal
 from openai import OpenAI
 from pydantic import BaseModel, ConfigDict, ValidationError
 
+from agents.heuristic_agent import HeuristicAgent
 from environments.email_triage_env import EmailTriageEnv
 from openenv.models import Action, Observation
 from openenv.tasks import get_email_tasks, get_graders
@@ -288,17 +289,32 @@ def verify_openai_api(client: OpenAI, model: str) -> None:
         raise RuntimeError(f"OpenAI Responses API health check failed for model {model}") from exc
 
 
-def run() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
-    api_key = os.environ.get("OPENAI_API_KEY")
-    if not api_key:
-        raise RuntimeError("OPENAI_API_KEY is required")
+def _reset_runtime_stats() -> None:
+    RUNTIME_STATS["api_failures"] = 0
+    RUNTIME_STATS["fallback_actions"] = 0
 
-    model = os.environ.get("OPENAI_MODEL", "gpt-5.2")
-    client = OpenAI(api_key=api_key)
-    verify_openai_api(client, model)
+
+def run_baseline(
+    *,
+    model: str | None = None,
+    api_key: str | None = None,
+    output_path: Path | None = None,
+) -> dict[str, object]:
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
+    _reset_runtime_stats()
+
+    model_name = model or os.environ.get("OPENAI_MODEL", "gpt-5.2")
+    resolved_api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY")
+    client = OpenAI(api_key=resolved_api_key) if resolved_api_key else None
+    backend = "openai" if client is not None else "heuristic"
+    if client is not None:
+        verify_openai_api(client, model_name)
+    else:
+        logger.warning("openai_api_key_missing_using_heuristic_baseline")
+
     results: dict[str, object] = {
-        "model": model,
+        "model": model_name,
+        "backend": backend,
         "tasks": [],
         "average_score": 0.0,
         "api_failures": 0,
@@ -312,9 +328,13 @@ def run() -> None:
         done = False
         total_reward = 0.0
         action_log: list[dict[str, object]] = []
+        heuristic_agent = HeuristicAgent()
 
         while not done:
-            action = choose_action(client, observation, model=model)
+            if client is not None:
+                action = choose_action(client, observation, model=model_name)
+            else:
+                action = heuristic_agent.act(observation)
             observation, reward, done, info = env.step(action)
             total_reward += reward.total
             action_log.append(
@@ -331,6 +351,8 @@ def run() -> None:
             )
 
         score = get_graders()[task.name](env.trajectory)
+        if not 0.0 <= score <= 1.0:
+            raise RuntimeError(f"grader for {task.name} returned out-of-range score: {score}")
         scores.append(score)
         task_result = {
             "task": task.name,
@@ -346,12 +368,16 @@ def run() -> None:
     results["average_score"] = sum(scores) / len(scores)
     results["api_failures"] = RUNTIME_STATS["api_failures"]
     results["fallback_actions"] = RUNTIME_STATS["fallback_actions"]
-    output_dir = Path("baseline/results")
-    output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / "baseline_results.json"
-    output_path.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
+    resolved_output_path = output_path or Path("baseline/results/baseline_results.json")
+    resolved_output_path.parent.mkdir(parents=True, exist_ok=True)
+    resolved_output_path.write_text(json.dumps(results, indent=2, sort_keys=True), encoding="utf-8")
     print(f"average_score={results['average_score']:.3f}")
-    print(f"results_file={output_path}")
+    print(f"results_file={resolved_output_path}")
+    return results
+
+
+def run() -> None:
+    run_baseline()
 
 
 if __name__ == "__main__":
