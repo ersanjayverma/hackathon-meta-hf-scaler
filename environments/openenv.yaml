@@ -1,6 +1,24 @@
 name: email_triage_benchmark
 version: 1.0.0
 description: Deterministic email triage benchmark with three real-world support tasks and dense trajectory-aware rewards.
+metadata:
+  author: blackhatbadshah
+  license: mit
+  tags:
+    - openenv
+    - benchmark
+    - email-triage
+compute:
+  cpu: 2
+  memory_gb: 12
+  timeout_seconds: 1200
+service:
+  sdk: docker
+  app_file: app.py
+  port: 7860
+  healthcheck:
+    path: /
+    method: GET
 entry_point: environments.email_triage_env:EmailTriageEnv
 observation_schema:
   title: Observation
