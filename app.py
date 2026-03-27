@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="OpenEnv Email Triage Benchmark", version="1.0.0")
 TASKS = get_email_tasks()
 TASKS_BY_NAME = {task.name: task for task in TASKS}
+SPACE_PREFIX = "/spaces/{owner}/{space_name}"
 
 
 def _json_model(model: BaseModel) -> dict[str, Any]:
@@ -105,16 +106,19 @@ async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONRespons
 
 
 @app.get("/")
+@app.get(SPACE_PREFIX)
 def root() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/health")
+@app.get(f"{SPACE_PREFIX}/health")
 def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/tasks")
+@app.get(f"{SPACE_PREFIX}/tasks")
 def tasks() -> dict[str, Any]:
     return {
         "tasks": [_task_summary(task) for task in TASKS],
@@ -125,6 +129,7 @@ def tasks() -> dict[str, Any]:
 
 
 @app.post("/reset")
+@app.post(f"{SPACE_PREFIX}/reset")
 async def reset(request: Request) -> dict[str, Any]:
     try:
         raw_body = await request.body()
@@ -141,6 +146,7 @@ async def reset(request: Request) -> dict[str, Any]:
 
 
 @app.post("/step")
+@app.post(f"{SPACE_PREFIX}/step")
 def step(action: Action) -> dict[str, Any]:
     try:
         observation, reward, done, info = session.step(action)
@@ -155,11 +161,13 @@ def step(action: Action) -> dict[str, Any]:
 
 
 @app.get("/state")
+@app.get(f"{SPACE_PREFIX}/state")
 def state() -> dict[str, Any]:
     return session.state()
 
 
 @app.post("/baseline")
+@app.post(f"{SPACE_PREFIX}/baseline")
 def baseline(payload: BaselineRequest | None = None) -> dict[str, Any]:
     request = payload or BaselineRequest()
     results = run_baseline(model=request.model)
@@ -176,6 +184,7 @@ def baseline(payload: BaselineRequest | None = None) -> dict[str, Any]:
 
 
 @app.post("/grader")
+@app.post(f"{SPACE_PREFIX}/grader")
 def grader(payload: GraderRequest) -> dict[str, float | str]:
     graders = get_graders()
     if payload.task_name not in graders:
