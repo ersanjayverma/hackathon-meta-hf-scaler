@@ -58,6 +58,18 @@ def test_reset_step_and_state_round_trip() -> None:
     assert state_payload["task"]["name"] == "task_easy_classification"
 
 
+def test_reset_accepts_empty_post_body() -> None:
+    response = client.post("/reset")
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["task_name"] in {
+        "task_easy_classification",
+        "task_medium_prioritization",
+        "task_hard_thread_reasoning",
+    }
+    assert payload["step_index"] == 0
+
+
 def test_grader_endpoint_returns_bounded_score() -> None:
     task = get_email_tasks()[0]
     env = EmailTriageEnv(task=task, seed=task.seed)

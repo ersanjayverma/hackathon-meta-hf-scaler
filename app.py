@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import logging
+from json import JSONDecodeError
 from dataclasses import dataclass, field
 from threading import RLock
 from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, ValidationError
 
 from baseline.run_baseline import run_baseline
 from environments.email_triage_env import EmailTriageEnv
@@ -124,10 +125,16 @@ def tasks() -> dict[str, Any]:
 
 
 @app.post("/reset")
-def reset(payload: ResetRequest | None = None) -> dict[str, Any]:
-    request = payload or ResetRequest()
+async def reset(request: Request) -> dict[str, Any]:
     try:
-        observation = session.reset(task_name=request.task_name, seed=request.seed)
+        raw_body = await request.body()
+        payload = ResetRequest() if not raw_body else ResetRequest.model_validate_json(raw_body)
+    except ValidationError as exc:
+        raise HTTPException(status_code=422, detail=exc.errors()) from exc
+    except JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+    try:
+        observation = session.reset(task_name=payload.task_name, seed=payload.seed)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
     return _json_model(observation)
