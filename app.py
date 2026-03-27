@@ -95,6 +95,20 @@ class EnvironmentSession:
 session = EnvironmentSession()
 
 
+@app.middleware("http")
+async def log_request_body(request: Request, call_next: Any) -> JSONResponse:
+    body = await request.body()
+    logger.info(
+        "request method=%s path=%s content_type=%s body=%r",
+        request.method,
+        request.url.path,
+        request.headers.get("content-type"),
+        body.decode("utf-8", errors="replace"),
+    )
+    request._body = body
+    return await call_next(request)
+
+
 @app.exception_handler(HTTPException)
 async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
