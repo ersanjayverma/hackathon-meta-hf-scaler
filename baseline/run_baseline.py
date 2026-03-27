@@ -286,22 +286,25 @@ def run_baseline(
     *,
     model: str | None = None,
     api_key: str | None = None,
+    base_url: str | None = None,
     output_path: Path | None = None,
 ) -> dict[str, object]:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     _reset_runtime_stats()
 
-    model_name = model or os.environ.get("OPENAI_MODEL", "gpt-5.2")
-    resolved_api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY")
-    client = OpenAI(api_key=resolved_api_key) if resolved_api_key else None
+    model_name = model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL", "gpt-5.2")
+    resolved_api_key = api_key if api_key is not None else os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
+    resolved_base_url = base_url if base_url is not None else os.environ.get("API_BASE_URL")
+    client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url) if resolved_api_key else None
     backend = "openai" if client is not None else "heuristic"
     if client is not None:
         verify_openai_api(client, model_name)
     else:
-        logger.warning("openai_api_key_missing_using_heuristic_baseline")
+        logger.warning("llm_credentials_missing_using_heuristic_baseline")
 
     results: dict[str, object] = {
         "model": model_name,
+        "base_url": resolved_base_url,
         "backend": backend,
         "tasks": [],
         "average_score": 0.0,
