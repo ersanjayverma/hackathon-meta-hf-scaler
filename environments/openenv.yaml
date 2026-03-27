@@ -4,10 +4,6 @@ description: Deterministic email triage benchmark with three real-world support 
 metadata:
   author: blackhatbadshah
   license: mit
-  tags:
-    - openenv
-    - benchmark
-    - email-triage
 compute:
   cpu: 2
   memory_gb: 12
