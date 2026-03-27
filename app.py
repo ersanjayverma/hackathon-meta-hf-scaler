@@ -138,11 +138,11 @@ async def reset(request: Request) -> dict[str, Any]:
             payload = ResetRequest()
         else:
             parsed = json.loads(raw_body)
-            payload = ResetRequest() if parsed is None else ResetRequest.model_validate(parsed)
+            payload = ResetRequest() if not isinstance(parsed, dict) else ResetRequest.model_validate(parsed)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except JSONDecodeError as exc:
-        raise HTTPException(status_code=400, detail="invalid JSON body") from exc
+        payload = ResetRequest()
     try:
         observation = session.reset(task_name=payload.task_name, seed=payload.seed)
     except KeyError as exc:
