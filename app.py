@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import json
 from json import JSONDecodeError
 from dataclasses import dataclass, field
 from threading import RLock
@@ -133,7 +134,11 @@ def tasks() -> dict[str, Any]:
 async def reset(request: Request) -> dict[str, Any]:
     try:
         raw_body = await request.body()
-        payload = ResetRequest() if not raw_body else ResetRequest.model_validate_json(raw_body)
+        if not raw_body or not raw_body.strip():
+            payload = ResetRequest()
+        else:
+            parsed = json.loads(raw_body)
+            payload = ResetRequest() if parsed is None else ResetRequest.model_validate(parsed)
     except ValidationError as exc:
         raise HTTPException(status_code=422, detail=exc.errors()) from exc
     except JSONDecodeError as exc:

@@ -70,6 +70,18 @@ def test_reset_accepts_empty_post_body() -> None:
     assert payload["step_index"] == 0
 
 
+def test_reset_accepts_null_json_body() -> None:
+    response = client.post("/reset", content="null", headers={"Content-Type": "application/json"})
+    assert response.status_code == 200
+    assert response.json()["step_index"] == 0
+
+
+def test_reset_accepts_whitespace_json_body() -> None:
+    response = client.post("/reset", content="   ", headers={"Content-Type": "application/json"})
+    assert response.status_code == 200
+    assert response.json()["step_index"] == 0
+
+
 def test_grader_endpoint_returns_bounded_score() -> None:
     task = get_email_tasks()[0]
     env = EmailTriageEnv(task=task, seed=task.seed)
