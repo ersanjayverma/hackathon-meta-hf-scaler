@@ -16,6 +16,22 @@ from openenv.tasks import Task, get_email_tasks, get_graders
 
 logger = logging.getLogger(__name__)
 app = FastAPI(title="OpenEnv Email Triage Benchmark", version="1.0.0")
+TASKS = get_email_tasks()
+TASKS_BY_NAME = {task.name: task for task in TASKS}
+
+
+def _json_model(model: BaseModel) -> dict[str, Any]:
+    return model.model_dump(mode="json")
+
+
+def _task_summary(task: Task) -> dict[str, Any]:
+    return {
+        "name": task.name,
+        "description": task.description,
+        "difficulty": task.difficulty,
+        "max_steps": task.max_steps,
+        "seed": task.seed,
+    }
 
 
 class ResetRequest(BaseModel):
@@ -40,8 +56,8 @@ class GraderRequest(BaseModel):
 
 @dataclass(slots=True)
 class EnvironmentSession:
-    tasks: dict[str, Task] = field(default_factory=lambda: {task.name: task for task in get_email_tasks()})
-    current_task_name: str = field(default_factory=lambda: get_email_tasks()[0].name)
+    tasks: dict[str, Task] = field(default_factory=lambda: dict(TASKS_BY_NAME))
+    current_task_name: str = field(default_factory=lambda: TASKS[0].name)
     env: EmailTriageEnv | None = None
     lock: RLock = field(default_factory=RLock)
 
@@ -100,16 +116,7 @@ def health() -> dict[str, str]:
 @app.get("/tasks")
 def tasks() -> dict[str, Any]:
     return {
-        "tasks": [
-            {
-                "name": task.name,
-                "description": task.description,
-                "difficulty": task.difficulty,
-                "max_steps": task.max_steps,
-                "seed": task.seed,
-            }
-            for task in get_email_tasks()
-        ],
+        "tasks": [_task_summary(task) for task in TASKS],
         "action_schema": Action.model_json_schema(),
         "observation_schema": Observation.model_json_schema(),
         "reward_schema": Reward.model_json_schema(),
@@ -123,7 +130,7 @@ def reset(payload: ResetRequest | None = None) -> dict[str, Any]:
         observation = session.reset(task_name=request.task_name, seed=request.seed)
     except KeyError as exc:
         raise HTTPException(status_code=404, detail=str(exc)) from exc
-    return observation.model_dump(mode="json")
+    return _json_model(observation)
 
 
 @app.post("/step")
@@ -133,8 +140,8 @@ def step(action: Action) -> dict[str, Any]:
     except RuntimeError as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
     return {
-        "observation": observation.model_dump(mode="json"),
-        "reward": reward.model_dump(mode="json"),
+        "observation": _json_model(observation),
+        "reward": _json_model(reward),
         "done": done,
         "info": info,
     }

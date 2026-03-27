@@ -121,7 +121,7 @@ This repository is configured for a Docker-based Hugging Face Space tagged `open
 
 - `README.md` contains HF Space front matter
 - `Dockerfile` starts a FastAPI service on port `7860`
-- `app.py` exposes `/`, `/health`, `/tasks`, and `/run/heuristic`
+- `app.py` exposes `/`, `/health`, `/tasks`, `/reset`, `/step`, `/state`, `/baseline`, and `/grader`
 
 Local container commands:
 

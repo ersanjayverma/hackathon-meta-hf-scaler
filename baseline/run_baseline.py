@@ -4,10 +4,10 @@ import json
 import logging
 import os
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from openai import OpenAI
-from pydantic import BaseModel, ConfigDict, ValidationError
+from pydantic import ValidationError
 
 from agents.heuristic_agent import HeuristicAgent
 from environments.email_triage_env import EmailTriageEnv
@@ -15,8 +15,6 @@ from openenv.models import Action, Observation
 from openenv.tasks import get_email_tasks, get_graders
 
 VALID_ACTION_TYPES = {"classify", "respond", "escalate", "ignore", "wait"}
-VALID_CATEGORIES = {"spam", "urgent", "normal", "escalation"}
-VALID_RESPONSE_TEMPLATES = {"acknowledge", "resolve", "request_info", "escalate_notice", "none"}
 VALID_PRIORITIES = {"low", "medium", "high", "critical"}
 SAFE_DEFAULT_PRIORITY = "medium"
 BASELINE_SYSTEM_PROMPT = """
@@ -44,16 +42,6 @@ Never output free text inside enum fields.
 
 logger = logging.getLogger(__name__)
 RUNTIME_STATS = {"api_failures": 0, "fallback_actions": 0}
-
-
-class BaselineDecision(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    action_type: Literal["classify", "respond", "escalate", "ignore", "wait"]
-    email_id: str | None = None
-    category: Literal["spam", "urgent", "normal", "escalation"] | None = None
-    response_template: Literal["acknowledge", "resolve", "request_info", "escalate_notice", "none"] | None = None
-    priority: Literal["low", "medium", "high", "critical"] | None = None
 
 
 def build_safe_default_payload(observation: Observation) -> dict[str, Any]:

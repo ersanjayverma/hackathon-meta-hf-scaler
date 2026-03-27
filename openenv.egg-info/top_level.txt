@@ -1,4 +1,0 @@
-agents
-baseline
-environments
-openenv
