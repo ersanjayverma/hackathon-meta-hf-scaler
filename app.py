@@ -17,6 +17,7 @@ from openenv.models import Action, Observation, Reward, StepRecord
 from openenv.tasks import Task, get_email_tasks, get_graders
 
 logger = logging.getLogger(__name__)
+request_logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="OpenEnv Email Triage Benchmark", version="1.0.0")
 TASKS = get_email_tasks()
 TASKS_BY_NAME = {task.name: task for task in TASKS}
@@ -98,7 +99,7 @@ session = EnvironmentSession()
 @app.middleware("http")
 async def log_request_body(request: Request, call_next: Any) -> JSONResponse:
     body = await request.body()
-    logger.info(
+    request_logger.info(
         "request method=%s path=%s content_type=%s body=%r",
         request.method,
         request.url.path,
@@ -116,7 +117,7 @@ async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse
 
 @app.exception_handler(Exception)
 async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
-    logger.exception("unhandled_api_error")
+    request_logger.exception("unhandled_api_error")
     return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
