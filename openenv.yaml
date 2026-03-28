@@ -1,0 +1,53 @@
+name: email_triage_benchmark
+version: 1.0.0
+description: Deterministic email triage benchmark with three real-world support tasks and dense trajectory-aware rewards.
+metadata:
+  author: blackhatbadshah
+  license: mit
+compute:
+  cpu: 2
+  memory_gb: 12
+  timeout_seconds: 1200
+service:
+  sdk: docker
+  app_file: app.py
+  port: 7860
+  healthcheck:
+    path: /
+    method: GET
+entry_point: environments.email_triage_env:EmailTriageEnv
+observation_schema:
+  title: Observation
+  type: object
+  additionalProperties: false
+  required:
+    - schema_version
+    - task_name
+    - step_index
+    - max_steps
+    - remaining_steps
+    - seed
+    - inbox
+    - completed_email_ids
+    - action_history
+action_schema:
+  title: Action
+  type: object
+  additionalProperties: false
+  required:
+    - schema_version
+    - action_type
+reward_definition:
+  title: Reward
+  type: object
+  description: Dense reward with components for classification, timeliness, prioritization, escalation, redundant actions, and missed deadlines.
+task_definitions:
+  - name: task_easy_classification
+    difficulty: easy
+    objective: Basic classification accuracy for spam and urgent email.
+  - name: task_medium_prioritization
+    difficulty: medium
+    objective: Prioritize urgent email, ignore spam, and choose correct responses.
+  - name: task_hard_thread_reasoning
+    difficulty: hard
+    objective: Handle a multi-step thread and escalate only when the triggering follow-up arrives.
