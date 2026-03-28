@@ -94,6 +94,19 @@ def test_reset_accepts_non_json_text_body() -> None:
     assert response.json()["step_index"] == 0
 
 
+def test_reset_ignores_unknown_json_fields() -> None:
+    response = client.post(
+        "/reset",
+        json={
+            "repo_url": "https://huggingface.co/spaces/blackhatbadshah/scaler-hackathon-meta",
+            "submission_id": 11,
+            "submission_validation_id": 61,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["step_index"] == 0
+
+
 def test_grader_endpoint_returns_bounded_score() -> None:
     task = get_email_tasks()[0]
     env = EmailTriageEnv(task=task, seed=task.seed)

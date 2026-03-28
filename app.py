@@ -39,7 +39,7 @@ def _task_summary(task: Task) -> dict[str, Any]:
 
 
 class ResetRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     task_name: str | None = None
     seed: int | None = None
