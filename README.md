@@ -5,14 +5,14 @@ colorFrom: blue
 colorTo: green
 sdk: docker
 sdk_version: "0.0.0"
-app_file: app.py
+app_file: server/app.py
 pinned: false
 app_port: 7860
 ---
 
 # OpenEnv
 
-OpenEnv is a benchmarkable real-world environment framework for agent evaluation. This version upgrades the original scaffold into a fully typed, Pydantic-based email triage benchmark with deterministic tasks, deterministic graders, dense rewards, replay, validation, and a baseline OpenAI runner.
+OpenEnv is a benchmarkable real-world environment framework for agent evaluation. This repository follows a scaffold-style layout with `server/app.py` as the canonical service entrypoint and a typed email-triage benchmark underneath it.
 
 ## Environment description and motivation
 
@@ -121,13 +121,22 @@ The bundled heuristic policy is deterministic and serves as the reference local 
 
 The OpenAI baseline script writes model-specific benchmark results to `baseline/results/baseline_results.json`.
 
+## Repository layout
+
+- `server/app.py`: canonical FastAPI application and `server` entrypoint
+- `server/Dockerfile`: scaffold-style server container definition
+- `server/requirements.txt`: runtime dependency snapshot for server deployments
+- `openenv.yaml`: root environment manifest for validators running from repo root
+- `environments/openenv.yaml`: environment-local manifest kept in sync with the root manifest
+- `outputs/`: gitkept output directories for logs and eval artifacts
+
 ## Hugging Face Space / container usage
 
 This repository is configured for a Docker-based Hugging Face Space tagged `openenv`.
 
 - `README.md` contains HF Space front matter
-- `Dockerfile` starts a FastAPI service on port `7860`
-- `app.py` exposes `/`, `/health`, `/tasks`, `/reset`, `/step`, `/state`, `/baseline`, and `/grader`
+- `Dockerfile` starts `server.app:app` on port `7860`
+- `server/app.py` exposes `/`, `/health`, `/tasks`, `/reset`, `/step`, `/state`, `/baseline`, and `/grader`
 
 Local container commands:
 

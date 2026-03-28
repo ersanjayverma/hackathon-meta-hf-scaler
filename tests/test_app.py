@@ -12,6 +12,7 @@ from openenv.tasks import get_email_tasks, get_graders
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "app.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
+import server.app as server_app
 MODULE_SPEC = importlib.util.spec_from_file_location("openenv_app", MODULE_PATH)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
 app_module = importlib.util.module_from_spec(MODULE_SPEC)
@@ -127,7 +128,7 @@ def test_grader_endpoint_returns_bounded_score() -> None:
 
 def test_baseline_endpoint_returns_metadata(monkeypatch) -> None:
     monkeypatch.setattr(
-        app_module,
+        server_app,
         "run_baseline",
         lambda model=None: {
             "model": model or "test-model",
