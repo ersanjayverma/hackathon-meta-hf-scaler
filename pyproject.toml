@@ -11,6 +11,7 @@ dependencies = [
   "fastapi>=0.111",
   "numpy>=1.26",
   "openai>=1.0.0",
+  "openenv-core>=0.2.0",
   "pydantic>=2.7",
   "prometheus-client>=0.20",
   "PyYAML>=6.0",
@@ -22,10 +23,11 @@ dev = ["pytest>=8.0"]
 
 [project.scripts]
 openenv = "openenv.cli:main"
+server = "server.app:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["openenv*", "agents*", "environments*", "baseline*"]
+include = ["openenv*", "agents*", "environments*", "baseline*", "server*"]
 exclude = ["tests*", "configs*"]
