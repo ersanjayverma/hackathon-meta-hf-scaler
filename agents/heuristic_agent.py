@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+import torch
+
 from openenv.models import Action, Observation
 
 
@@ -11,14 +13,15 @@ class HeuristicAgent:
         if not observation.inbox:
             return Action(action_type="wait")
 
-        inbox = sorted(
-            observation.inbox,
-            key=lambda email: (
-                {"critical": 0, "high": 1, "medium": 2, "low": 3}[email.priority_hint],
-                -email.age,
-            ),
-        )
-        email = inbox[0]
+        priority_values = {"critical": 4.0, "high": 3.0, "medium": 2.0, "low": 1.0}
+        inbox = list(observation.inbox)
+        priority_scores = torch.tensor([priority_values[email.priority_hint] for email in inbox], dtype=torch.float32)
+        age_scores = torch.tensor([float(email.age) for email in inbox], dtype=torch.float32)
+        noise_scores = torch.tensor([float(email.noise_score) for email in inbox], dtype=torch.float32)
+
+        # Use a small torch-based ranking pass to prioritize urgent, older, low-noise emails.
+        ranking_scores = priority_scores * 3.0 + age_scores * 0.25 - noise_scores
+        email = inbox[int(torch.argmax(ranking_scores).item())]
         text = f"{email.subject} {email.body}".lower()
 
         if any(token in text for token in ("unsubscribe", "offer", "webinar", "newsletter")):
