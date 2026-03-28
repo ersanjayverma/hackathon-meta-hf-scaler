@@ -71,12 +71,6 @@ source .venv/bin/activate
 pip install -e .[dev]
 ```
 
-## Run the local demo
-
-```bash
-python main.py
-```
-
 ## Run the server locally
 
 ```bash
