@@ -77,6 +77,12 @@ pip install -e .[dev]
 python main.py
 ```
 
+## Run the server locally
+
+```bash
+uv run server
+```
+
 ## Validate the environment
 
 ```bash

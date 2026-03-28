@@ -4,3 +4,7 @@ __pycache__/
 .venv/
 openenv.egg-info/
 baseline/results/
+outputs/logs/*
+outputs/evals/*
+!outputs/logs/.gitkeep
+!outputs/evals/.gitkeep
