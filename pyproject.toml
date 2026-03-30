@@ -30,5 +30,5 @@ server = "server.app:main"
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["openenv*", "agents*", "environments*", "baseline*", "server*"]
+include = ["openenv*", "agents*", "environments*", "baseline*", "server*", "env*", "api*"]
 exclude = ["tests*", "configs*"]
