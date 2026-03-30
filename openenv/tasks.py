@@ -186,8 +186,41 @@ def _thread_reasoning_task() -> Task:
     )
 
 
+def _clone_task_sample(task: Task, sample_index: int, seed: int) -> Task:
+    return task.model_copy(
+        update={
+            "name": f"{task.name}_sample_{sample_index:02d}",
+            "description": f"{task.description} Seeded sample {sample_index:02d}.",
+            "seed": seed,
+        }
+    )
+
+
+def _sampled_task_variants() -> list[Task]:
+    base_tasks = [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
+    variant_plan = [
+        (base_tasks[0], 10, 1000),
+        (base_tasks[1], 10, 2000),
+        (base_tasks[2], 10, 3000),
+    ]
+    samples: list[Task] = []
+    sample_index = 1
+    for task, count, seed_offset in variant_plan:
+        for local_index in range(count):
+            samples.append(
+                _clone_task_sample(
+                    task=task,
+                    sample_index=sample_index,
+                    seed=task.seed + seed_offset + local_index,
+                )
+            )
+            sample_index += 1
+    return samples
+
+
 def get_email_tasks() -> list[Task]:
-    return [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
+    base_tasks = [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
+    return base_tasks + _sampled_task_variants()
 
 
 def _task_one_grade(trajectory: list[StepRecord]) -> float:
@@ -294,8 +327,18 @@ def _task_three_grade(trajectory: list[StepRecord]) -> float:
 
 
 def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
-    return {
+    graders = {
         "task_easy_classification": _task_one_grade,
         "task_medium_prioritization": _task_two_grade,
         "task_hard_thread_reasoning": _task_three_grade,
     }
+    for task in get_email_tasks():
+        if task.name in graders:
+            continue
+        if task.name.startswith("task_easy_classification"):
+            graders[task.name] = _task_one_grade
+        elif task.name.startswith("task_medium_prioritization"):
+            graders[task.name] = _task_two_grade
+        elif task.name.startswith("task_hard_thread_reasoning"):
+            graders[task.name] = _task_three_grade
+    return graders
