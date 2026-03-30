@@ -125,6 +125,7 @@ class EmailSpec(VersionedModel):
     classification_deadline: int = Field(ge=0)
     response_deadline: int = Field(ge=0)
     escalation_deadline: int = Field(ge=0)
+    deadline_step: Optional[int] = Field(default=None, ge=0)
 
     def to_view(self, current_step: int, seen: bool) -> EmailView:
         return EmailView(
@@ -147,4 +148,3 @@ class StepRecord(VersionedModel):
     observation: Observation
     done: bool
     info: dict[str, Any] = Field(default_factory=dict)
-

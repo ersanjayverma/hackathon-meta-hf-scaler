@@ -69,7 +69,7 @@ def test_wrong_action_schedules_delayed_consequences() -> None:
     assert reward.total < 0.2
     assert info["scheduled_events"]
     scheduled_types = {event["event_type"] for event in info["scheduled_events"]}
-    assert {"followup_email", "penalty", "escalation"} <= scheduled_types
+    assert {"followup_email", "penalty", "escalation", "sla_breach"} <= scheduled_types
     assert info["system_state"]["stress"] > 0.0
 
 
@@ -94,6 +94,63 @@ def test_delayed_followup_and_penalty_trigger_later() -> None:
     assert "missed_important" in reward.components
     assert reward.components["missed_important"] < 0.0
     assert info["system_state"]["stress"] >= 4.5
+
+
+def test_initial_emails_receive_deterministic_sla_deadlines() -> None:
+    task = get_email_tasks()[0]
+    env_a = EmailTriageEnv(task=task, seed=task.seed)
+    env_b = EmailTriageEnv(task=task, seed=task.seed)
+
+    env_a.reset()
+    env_b.reset()
+
+    deadlines_a = {spec.email_id: spec.deadline_step for spec in env_a._email_specs.values()}
+    deadlines_b = {spec.email_id: spec.deadline_step for spec in env_b._email_specs.values()}
+    assert deadlines_a == deadlines_b
+    assert all(deadline is not None and deadline >= 3 for deadline in deadlines_a.values())
+
+
+def test_unresolved_email_triggers_sla_breach_penalty() -> None:
+    task = get_email_tasks()[0]
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    env.reset()
+    deadline = env._email_specs["e-002"].deadline_step
+    assert deadline is not None
+
+    reward = None
+    info = {}
+    for _ in range(deadline + 1):
+        _, reward, _, info = env.step(Action(action_type="wait"))
+        if "sla_breach" in reward.components:
+            break
+
+    assert reward is not None
+    assert reward.components["sla_breach"] == -10.0
+    assert info["system_state"]["sla_breaches"] >= 1.0
+    assert info["system_state"]["stress"] >= 15.0
+
+
+def test_repeated_sla_breaches_trigger_overload_and_cascade() -> None:
+    task = get_email_tasks()[1]
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    env.reset()
+
+    triggered_types: set[str] = set()
+    pending_counts: list[int] = []
+    for _ in range(task.max_steps):
+        observation, reward, done, info = env.step(Action(action_type="wait"))
+        triggered_types.update(event["event_type"] for event in info["triggered_events"])
+        pending_counts.append(len(observation.inbox))
+        if "system_overload" in triggered_types:
+            break
+        if done:
+            break
+
+    assert "sla_breach" in triggered_types
+    assert "system_overload" in triggered_types
+    assert info["system_state"]["sla_breaches"] >= 3.0
+    assert info["system_state"]["stress"] >= 20.0
+    assert max(pending_counts) >= 3
 
 
 def test_episode_stays_alive_after_inbox_is_temporarily_resolved() -> None:
