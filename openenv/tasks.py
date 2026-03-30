@@ -49,13 +49,43 @@ def _classification_task() -> Task:
             response_deadline=2,
             escalation_deadline=4,
         ),
+        EmailSpec(
+            email_id="e-003",
+            sender="pm@customer.example",
+            subject="Migration checklist review",
+            body="Please review the migration checklist and confirm missing dependencies.",
+            thread_id="t-003",
+            arrival_step=1,
+            priority_hint="medium",
+            noise_score=0.18,
+            true_category="normal",
+            response_template="request_info",
+            requires_response=True,
+            classification_deadline=3,
+            response_deadline=5,
+            escalation_deadline=6,
+        ),
+        EmailSpec(
+            email_id="e-004",
+            sender="events@vendor.example",
+            subject="Webinar invite and newsletter bundle",
+            body="Join our webinar and subscribe to the quarterly newsletter for updates.",
+            thread_id="t-004",
+            arrival_step=2,
+            priority_hint="low",
+            noise_score=0.89,
+            true_category="spam",
+            classification_deadline=4,
+            response_deadline=6,
+            escalation_deadline=6,
+        ),
     ]
     return Task(
         name="task_easy_classification",
-        description="Classify obvious spam and urgent operational mail while managing delayed follow-up consequences.",
+        description="Classify obvious spam, urgent operational mail, and routine requests while managing delayed follow-up consequences.",
         initial_state={"emails": [email.model_dump(mode="json") for email in emails]},
-        success_criteria="Correctly classify and respond while avoiding delayed follow-up incidents and SLA drift.",
-        max_steps=24,
+        success_criteria="Correctly classify the mixed inbox, respond to normal and urgent items, and avoid delayed follow-up incidents and SLA drift.",
+        max_steps=28,
         difficulty="easy",
         seed=101,
     )
@@ -109,13 +139,45 @@ def _prioritization_task() -> Task:
             response_deadline=3,
             escalation_deadline=4,
         ),
+        EmailSpec(
+            email_id="e-104",
+            sender="security@customer.example",
+            subject="Checkout timeout escalation request",
+            body="Checkout timeout complaints are increasing and revenue is at risk.",
+            thread_id="t-104",
+            arrival_step=2,
+            priority_hint="high",
+            noise_score=0.08,
+            true_category="escalation",
+            response_template="escalate_notice",
+            requires_response=True,
+            requires_escalation=True,
+            escalation_trigger_step=2,
+            classification_deadline=3,
+            response_deadline=4,
+            escalation_deadline=4,
+        ),
+        EmailSpec(
+            email_id="e-105",
+            sender="marketing@vendor.example",
+            subject="Newsletter and webinar sponsorship offer",
+            body="We would love to include your team in our webinar and newsletter sponsorship package.",
+            thread_id="t-105",
+            arrival_step=3,
+            priority_hint="low",
+            noise_score=0.91,
+            true_category="spam",
+            classification_deadline=5,
+            response_deadline=6,
+            escalation_deadline=6,
+        ),
     ]
     return Task(
         name="task_medium_prioritization",
-        description="Prioritize urgent mail, ignore obvious spam, and manage the downstream impact of mistakes over time.",
+        description="Prioritize urgent mail, classify routine work, ignore obvious spam, and manage the downstream impact of mistakes over time.",
         initial_state={"emails": [email.model_dump(mode="json") for email in emails]},
-        success_criteria="Handle urgent requests first, avoid cascading follow-ups, and keep system stress low over a longer horizon.",
-        max_steps=28,
+        success_criteria="Handle urgent and escalation requests first, clear routine follow-ups, avoid spam distractions, and keep system stress low over a longer horizon.",
+        max_steps=34,
         difficulty="medium",
         seed=202,
     )
@@ -174,13 +236,43 @@ def _thread_reasoning_task() -> Task:
             response_deadline=5,
             escalation_deadline=5,
         ),
+        EmailSpec(
+            email_id="e-204",
+            sender="ops@customer.example",
+            subject="Migration review before release",
+            body="Need a fast review of the migration plan before tonight's release window.",
+            thread_id="t-204",
+            arrival_step=3,
+            priority_hint="medium",
+            noise_score=0.17,
+            true_category="normal",
+            response_template="request_info",
+            requires_response=True,
+            classification_deadline=5,
+            response_deadline=6,
+            escalation_deadline=7,
+        ),
+        EmailSpec(
+            email_id="e-205",
+            sender="news@internal.example",
+            subject="Quarterly webinar newsletter",
+            body="Internal newsletter covering the next webinar calendar and community updates.",
+            thread_id="t-205",
+            arrival_step=4,
+            priority_hint="low",
+            noise_score=0.86,
+            true_category="spam",
+            classification_deadline=6,
+            response_deadline=8,
+            escalation_deadline=8,
+        ),
     ]
     return Task(
         name="task_hard_thread_reasoning",
-        description="Track a multi-step outage thread, delayed fallout, and escalation timing under sustained inbox pressure.",
+        description="Track a multi-step outage thread, routine side requests, and delayed fallout under sustained inbox pressure.",
         initial_state={"emails": [email.model_dump(mode="json") for email in emails]},
-        success_criteria="Acknowledge the first outage note, avoid premature escalation, absorb delayed consequences, and escalate when evidence justifies it.",
-        max_steps=32,
+        success_criteria="Acknowledge the first outage note, manage side requests without distraction, absorb delayed consequences, and escalate when evidence justifies it.",
+        max_steps=38,
         difficulty="hard",
         seed=303,
     )
@@ -242,8 +334,27 @@ def _task_one_grade(trajectory: list[StepRecord]) -> float:
                 penalty += 0.25
         elif action.action_type != "wait":
             penalty += 0.1
-    if seen_ids != {"e-001", "e-002"}:
+    if not {"e-001", "e-002"}.issubset(seen_ids):
         penalty += 0.2
+    if any(
+        step.action.action_type == "classify"
+        and step.action.email_id == "e-003"
+        and step.action.category == "normal"
+        for step in trajectory
+    ):
+        correct += 0.2
+    if any(
+        step.action.action_type == "respond"
+        and step.action.email_id == "e-003"
+        and step.action.response_template == "request_info"
+        for step in trajectory
+    ):
+        correct += 0.1
+    if any(
+        step.action.action_type == "ignore" and step.action.email_id == "e-004"
+        for step in trajectory
+    ):
+        correct += 0.2
     return max(0.0, min(1.0, correct - penalty))
 
 
@@ -278,6 +389,23 @@ def _task_two_grade(trajectory: list[StepRecord]) -> float:
         for step in trajectory
     ):
         score += 0.15
+    if any(
+        step.action.action_type == "classify"
+        and step.action.email_id == "e-104"
+        and step.action.category == "escalation"
+        for step in trajectory
+    ):
+        score += 0.1
+    if any(
+        step.action.action_type == "escalate" and step.action.email_id == "e-104"
+        for step in trajectory
+    ):
+        score += 0.1
+    if any(
+        step.action.action_type == "ignore" and step.action.email_id == "e-105"
+        for step in trajectory
+    ):
+        score += 0.05
     loops = sum(1 for step in trajectory if step.info.get("loop_detected"))
     score -= min(loops * 0.05, 0.2)
     return max(0.0, min(1.0, score))
@@ -321,6 +449,18 @@ def _task_three_grade(trajectory: list[StepRecord]) -> float:
         for step in trajectory
     ):
         score += 0.2
+    if any(
+        step.action.action_type == "respond"
+        and step.action.email_id == "e-204"
+        and step.action.response_template == "request_info"
+        for step in trajectory
+    ):
+        score += 0.1
+    if any(
+        step.action.action_type == "ignore" and step.action.email_id == "e-205"
+        for step in trajectory
+    ):
+        score += 0.1
     loops = sum(1 for step in trajectory if step.info.get("loop_detected"))
     score -= min(loops * 0.05, 0.2)
     return max(0.0, min(1.0, score))
