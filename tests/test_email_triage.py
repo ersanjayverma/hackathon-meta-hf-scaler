@@ -58,6 +58,55 @@ def test_api_compliance() -> None:
     assert isinstance(env.state(), dict)
 
 
+def test_wrong_action_schedules_delayed_consequences() -> None:
+    task = get_email_tasks()[0]
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    env.reset()
+
+    _, reward, done, info = env.step(Action(action_type="ignore", email_id="e-002"))
+
+    assert not done
+    assert reward.total < 0.2
+    assert info["scheduled_events"]
+    scheduled_types = {event["event_type"] for event in info["scheduled_events"]}
+    assert {"followup_email", "penalty", "escalation"} <= scheduled_types
+    assert info["system_state"]["stress"] > 0.0
+
+
+def test_delayed_followup_and_penalty_trigger_later() -> None:
+    task = get_email_tasks()[0]
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    env.reset()
+    env.step(Action(action_type="ignore", email_id="e-002"))
+
+    observation, reward, done, info = env.step(Action(action_type="wait"))
+    assert not done
+    assert info["triggered_events"] == []
+    assert all(email.email_id != "e-002-f0-2" for email in observation.inbox)
+
+    observation, reward, done, info = env.step(Action(action_type="wait"))
+    assert not done
+    assert any(event["event_type"] == "followup_email" for event in info["triggered_events"])
+    assert any(email.email_id == "e-002-f0-2" for email in observation.inbox)
+
+    observation, reward, done, info = env.step(Action(action_type="wait"))
+    assert not done
+    assert "missed_important" in reward.components
+    assert reward.components["missed_important"] < 0.0
+    assert info["system_state"]["stress"] >= 4.5
+
+
+def test_episode_stays_alive_after_inbox_is_temporarily_resolved() -> None:
+    task = get_email_tasks()[0]
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    env.reset()
+
+    env.step(Action(action_type="classify", email_id="e-001", category="spam"))
+    observation, _, done, _ = env.step(Action(action_type="ignore", email_id="e-001"))
+    assert not done
+    assert observation.remaining_steps == task.max_steps - 2
+
+
 def test_replay_round_trip(tmp_path: Path) -> None:
     task = get_email_tasks()[0]
     env = EmailTriageEnv(task=task, seed=task.seed)

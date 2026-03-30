@@ -52,10 +52,10 @@ def _classification_task() -> Task:
     ]
     return Task(
         name="task_easy_classification",
-        description="Classify obvious spam and urgent operational mail.",
+        description="Classify obvious spam and urgent operational mail while managing delayed follow-up consequences.",
         initial_state={"emails": [email.model_dump(mode="json") for email in emails]},
-        success_criteria="Correctly classify both visible emails within one step each.",
-        max_steps=4,
+        success_criteria="Correctly classify and respond while avoiding delayed follow-up incidents and SLA drift.",
+        max_steps=24,
         difficulty="easy",
         seed=101,
     )
@@ -112,10 +112,10 @@ def _prioritization_task() -> Task:
     ]
     return Task(
         name="task_medium_prioritization",
-        description="Prioritize urgent mail, ignore obvious spam, and send the right response.",
+        description="Prioritize urgent mail, ignore obvious spam, and manage the downstream impact of mistakes over time.",
         initial_state={"emails": [email.model_dump(mode="json") for email in emails]},
-        success_criteria="Handle the urgent email first and choose correct responses with no redundant actions.",
-        max_steps=6,
+        success_criteria="Handle urgent requests first, avoid cascading follow-ups, and keep system stress low over a longer horizon.",
+        max_steps=28,
         difficulty="medium",
         seed=202,
     )
@@ -177,10 +177,10 @@ def _thread_reasoning_task() -> Task:
     ]
     return Task(
         name="task_hard_thread_reasoning",
-        description="Track a multi-step outage thread and escalate only when the follow-up evidence arrives.",
+        description="Track a multi-step outage thread, delayed fallout, and escalation timing under sustained inbox pressure.",
         initial_state={"emails": [email.model_dump(mode="json") for email in emails]},
-        success_criteria="Acknowledge the first outage note, avoid premature escalation, then escalate immediately after the follow-up arrives.",
-        max_steps=7,
+        success_criteria="Acknowledge the first outage note, avoid premature escalation, absorb delayed consequences, and escalate when evidence justifies it.",
+        max_steps=32,
         difficulty="hard",
         seed=303,
     )
