@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Callable
 
 from pydantic import Field
@@ -310,9 +311,21 @@ def _sampled_task_variants() -> list[Task]:
     return samples
 
 
-def get_email_tasks() -> list[Task]:
+def get_builtin_email_tasks() -> list[Task]:
     base_tasks = [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
     return base_tasks + _sampled_task_variants()
+
+
+def get_email_tasks(scenarios_path: str | Path | None = None) -> list[Task]:
+    tasks = list(get_builtin_email_tasks())
+    if scenarios_path is None:
+        scenarios_path = Path("scenarios")
+    from .task_loader import load_task_scenarios, log_task_load_report
+
+    report = load_task_scenarios(scenarios_path)
+    if report.issues:
+        log_task_load_report(report)
+    return tasks + report.loaded_tasks
 
 
 def _task_one_grade(trajectory: list[StepRecord]) -> float:
