@@ -4,6 +4,7 @@ import json
 import logging
 import os
 from pathlib import Path
+from datetime import datetime, timezone
 from typing import Any
 
 from openai import OpenAI
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 
 from agents.heuristic_agent import HeuristicAgent
 from environments.email_triage_env import EmailTriageEnv
+from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
 from openenv.tasks import get_email_tasks, get_graders
 
@@ -236,7 +238,7 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
     try:
         response = client.responses.create(
             model=model,
-            temperature=0.0,
+            temperature=BENCHMARK_METADATA.deterministic_temperature,
             input=[
                 {
                     "role": "system",
@@ -270,7 +272,11 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
 
 def verify_openai_api(client: OpenAI, model: str) -> None:
     try:
-        response = client.responses.create(model=model, input="ping", temperature=0.0)
+        response = client.responses.create(
+            model=model,
+            input="ping",
+            temperature=BENCHMARK_METADATA.deterministic_temperature,
+        )
         logger.info("openai_api_healthcheck_ok output=%s", response.output_text)
     except Exception as exc:
         logger.error("openai_api_healthcheck_failed error=%s", exc)
@@ -292,7 +298,7 @@ def run_baseline(
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     _reset_runtime_stats()
 
-    model_name = model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL", "gpt-5.2")
+    model_name = model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL", BENCHMARK_METADATA.default_model)
     resolved_api_key = api_key if api_key is not None else os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
     resolved_base_url = base_url if base_url is not None else os.environ.get("API_BASE_URL")
     client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url) if resolved_api_key else None
@@ -302,6 +308,7 @@ def run_baseline(
     else:
         logger.warning("llm_credentials_missing_using_heuristic_baseline")
 
+    tasks = get_email_tasks()
     results: dict[str, object] = {
         "model": model_name,
         "base_url": resolved_base_url,
@@ -310,10 +317,18 @@ def run_baseline(
         "average_score": 0.0,
         "api_failures": 0,
         "fallback_actions": 0,
+        "metadata": {
+            **BENCHMARK_METADATA.to_dict(),
+            "model_name": model_name,
+            "base_url": resolved_base_url,
+            "backend": backend,
+            "task_count": len(tasks),
+            "generated_at_utc": datetime.now(timezone.utc).isoformat(),
+        },
     }
     scores: list[float] = []
 
-    for task in get_email_tasks():
+    for task in tasks:
         env = EmailTriageEnv(task=task, seed=task.seed)
         observation = env.reset()
         done = False

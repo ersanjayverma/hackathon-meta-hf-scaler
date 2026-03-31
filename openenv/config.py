@@ -1,0 +1,38 @@
+from __future__ import annotations
+
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+
+@dataclass(frozen=True, slots=True)
+class EmailTriageConfig:
+    loop_penalty: float = -0.1
+    urgent_wait_penalty: float = -0.12
+    missed_classification_penalty: float = -0.1
+    missed_response_penalty: float = -0.15
+    missed_escalation_penalty: float = -0.2
+    stress_penalty_scale: float = 0.1
+    sla_pressure_penalty_scale: float = 5.0
+    system_collapse_stress: float = 100.0
+    system_collapse_penalty: float = -50.0
+    stable_resolution_ends_episode: bool = True
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkMetadata:
+    benchmark_name: str = "email_triage_benchmark"
+    benchmark_version: str = "1.0.0"
+    output_schema_version: str = "baseline_results/v2"
+    default_model: str = "gpt-5.2"
+    deterministic_temperature: float = 0.0
+    canonical_manifest: str = "openenv.yaml"
+    generated_manifest: str = "environments/openenv.yaml"
+
+    def to_dict(self) -> dict[str, object]:
+        return asdict(self)
+
+
+EMAIL_TRIAGE_CONFIG = EmailTriageConfig()
+BENCHMARK_METADATA = BenchmarkMetadata()
+CANONICAL_MANIFEST_PATH = Path(BENCHMARK_METADATA.canonical_manifest)
+GENERATED_MANIFEST_PATH = Path(BENCHMARK_METADATA.generated_manifest)

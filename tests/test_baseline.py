@@ -116,3 +116,20 @@ def test_choose_action_counts_api_failures() -> None:
     assert action.action_type == "ignore"
     assert RUNTIME_STATS["api_failures"] == 1
     assert RUNTIME_STATS["fallback_actions"] == 1
+
+
+def test_run_baseline_writes_benchmark_metadata(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(baseline_run_baseline, "get_email_tasks", lambda: get_email_tasks()[:1])
+    monkeypatch.setattr(baseline_run_baseline, "get_graders", lambda: {get_email_tasks()[0].name: lambda _: 1.0})
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    result = baseline_run_baseline.run_baseline(
+        model="test-model-v1",
+        api_key=None,
+        base_url=None,
+        output_path=tmp_path / "baseline_results.json",
+    )
+    metadata = result["metadata"]
+    assert metadata["output_schema_version"] == "baseline_results/v2"
+    assert metadata["model_name"] == "test-model-v1"
+    assert metadata["task_count"] == 1

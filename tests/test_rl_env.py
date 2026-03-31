@@ -41,3 +41,25 @@ def test_rl_env_done_includes_grader_score() -> None:
     assert "grader_score" in final_info
     assert 0.0 <= float(final_info["grader_score"]) <= 1.0
     env.close()
+
+
+def test_rl_env_exposes_vector_observation_and_mask() -> None:
+    env = OpenEnvGymLikeEnv(task_name="task_easy_classification", seed=101)
+    state = env.reset()
+    assert len(state.vector_observation) == state.metadata["feature_count"]
+    assert len(state.action_mask) == state.metadata["action_count"]
+    assert state.action_mask[0] == 1
+    env.close()
+
+
+def test_rl_env_discrete_action_and_gym_api() -> None:
+    env = OpenEnvGymLikeEnv(task_name="task_easy_classification", seed=101)
+    observation, info = env.reset_gym(seed=101)
+    valid_actions = [index for index, allowed in enumerate(info["action_mask"]) if allowed]
+    next_observation, reward, terminated, truncated, next_info = env.step_gym(valid_actions[1])
+    assert len(observation) == len(next_observation)
+    assert isinstance(reward, float)
+    assert isinstance(terminated, bool)
+    assert isinstance(truncated, bool)
+    assert "action_mask" in next_info
+    env.close()

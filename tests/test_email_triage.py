@@ -6,7 +6,8 @@ from agents.heuristic_agent import HeuristicAgent
 from environments.email_triage_env import EmailTriageEnv
 from openenv.models import Action, Observation, Reward
 from openenv.replay import ReplayStore
-from openenv.tasks import get_email_tasks, get_graders
+from openenv.tasks import Task, get_email_tasks, get_graders
+from openenv.models import EmailSpec
 from openenv.validation import validate_environment
 
 
@@ -162,6 +163,50 @@ def test_episode_stays_alive_after_inbox_is_temporarily_resolved() -> None:
     observation, _, done, _ = env.step(Action(action_type="ignore", email_id="e-001"))
     assert not done
     assert observation.remaining_steps == task.max_steps - 2
+
+
+def test_episode_can_end_on_stable_resolution() -> None:
+    task = Task(
+        name="test_stable_resolution",
+        description="Single spam mail for stable resolution testing.",
+        initial_state={
+            "emails": [
+                EmailSpec(
+                    email_id="s-001",
+                    sender="ads@promo.example",
+                    subject="Limited time offer",
+                    body="Buy now and unsubscribe below.",
+                    thread_id="s-thread",
+                    arrival_step=0,
+                    priority_hint="low",
+                    noise_score=0.9,
+                    true_category="spam",
+                    classification_deadline=1,
+                    response_deadline=3,
+                    escalation_deadline=3,
+                ).model_dump(mode="json")
+            ]
+        },
+        success_criteria="Resolve the only email.",
+        max_steps=6,
+        difficulty="easy",
+        seed=404,
+    )
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    env.reset()
+    env.step(Action(action_type="classify", email_id="s-001", category="spam"))
+    _, _, done, info = env.step(Action(action_type="ignore", email_id="s-001"))
+    assert done
+    assert info["termination_reason"] == "stable_resolution"
+
+
+def test_observation_uses_coarsened_noise_signal() -> None:
+    task = get_email_tasks()[0]
+    env = EmailTriageEnv(task=task, seed=task.seed)
+    observation = env.reset()
+    easy_by_id = {email.email_id: email for email in observation.inbox}
+    assert easy_by_id["e-001"].noise_score == 0.9
+    assert easy_by_id["e-002"].noise_score == 0.2
 
 
 def test_replay_round_trip(tmp_path: Path) -> None:

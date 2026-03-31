@@ -6,6 +6,7 @@ from typing import Any, Optional
 import numpy as np
 
 from openenv.base_env import BaseEnv
+from openenv.config import EMAIL_TRIAGE_CONFIG
 from openenv.engine import EnvironmentEngine, ScheduledEvent
 from openenv.logger import StructuredLogger
 from openenv.models import Action, ActionTrace, EmailSpec, Observation, Reward, StepRecord
@@ -97,7 +98,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 observation_before = self._observation()
                 loop_key = (action.action_type, action.email_id or "none")
                 if loop_key == self._last_action_key:
-                    reward_components["loop_penalty"] = -0.1
+                    reward_components["loop_penalty"] = EMAIL_TRIAGE_CONFIG.loop_penalty
                     info["loop_detected"] = True
                 self._last_action_key = loop_key
 
@@ -107,16 +108,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                     info.update(self._apply_action(action, reward_components))
 
                 reward_components.update(self._deadline_penalties())
-                reward_components["stress_penalty"] = -(self._system_state["stress"] * 0.1)
-                reward_components["sla_pressure_penalty"] = -(self._system_state["sla_breaches"] * 5.0)
-                if self._system_state["stress"] > 100.0:
-                    reward_components["system_collapse"] = -50.0
-                total = sum(reward_components.values())
-                reward = Reward(
-                    total=total,
-                    components=reward_components,
-                    reason="dense trajectory-aware reward",
-                )
+                reward = self._build_reward(reward_components)
 
                 self._action_history.append(
                     ActionTrace(
@@ -128,26 +120,10 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 )
                 self._step_index += 1
                 self._ingest_arrivals()
-                done = self._is_done()
+                termination_reason = self._termination_reason()
+                done = termination_reason is not None
                 observation_after = self._observation()
-                scheduled_events = self._engine.event_queue.snapshot()
-                info.update(
-                    {
-                        "reward_breakdown": reward.components,
-                        "pending_emails": len(observation_after.inbox),
-                        "backlog_size": len(observation_after.inbox),
-                        "action_trace": self._action_history[-1].model_dump(mode="json"),
-                        "seed": self._seed,
-                        "scheduled_events": scheduled_events,
-                        "triggered_events": triggered_events,
-                        "system_state": dict(self._system_state),
-                        "events_triggered": triggered_events,
-                        "emails_pending": len(observation_after.inbox),
-                        "step": self._step_index,
-                        "sla_breaches": self._system_state["sla_breaches"],
-                        "stress": self._system_state["stress"],
-                    }
-                )
+                info.update(self._build_step_info(observation_after, reward, triggered_events, termination_reason))
                 step_record = StepRecord(
                     step_index=self._step_index - 1,
                     action=action,
@@ -249,11 +225,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             self._closed = True
 
     def _observation(self) -> Observation:
-        inbox = [
-            self._observed_view(self._email_specs[email_id])
-            for email_id in self._visible_ids
-            if email_id not in self._completed_ids
-        ]
+        inbox = self._build_inbox()
         return Observation(
             task_name=self.task.name,
             step_index=self._step_index,
@@ -277,6 +249,54 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             spec = spec.model_copy(update={"deadline_step": deadline_step})
         self._email_specs[spec.email_id] = spec
         self._schedule_sla_breach(spec)
+
+    def _build_inbox(self) -> list[Any]:
+        return [
+            self._observed_view(self._email_specs[email_id])
+            for email_id in self._visible_ids
+            if email_id not in self._completed_ids
+        ]
+
+    def _build_reward(self, reward_components: dict[str, float]) -> Reward:
+        components = dict(reward_components)
+        components["stress_penalty"] = -(self._system_state["stress"] * EMAIL_TRIAGE_CONFIG.stress_penalty_scale)
+        components["sla_pressure_penalty"] = -(
+            self._system_state["sla_breaches"] * EMAIL_TRIAGE_CONFIG.sla_pressure_penalty_scale
+        )
+        if self._system_state["stress"] > EMAIL_TRIAGE_CONFIG.system_collapse_stress:
+            components["system_collapse"] = EMAIL_TRIAGE_CONFIG.system_collapse_penalty
+        return Reward(
+            total=sum(components.values()),
+            components=components,
+            reason="dense trajectory-aware reward",
+        )
+
+    def _build_step_info(
+        self,
+        observation: Observation,
+        reward: Reward,
+        triggered_events: list[dict[str, Any]],
+        termination_reason: str | None,
+    ) -> dict[str, Any]:
+        info = {
+            "reward_breakdown": reward.components,
+            "pending_emails": len(observation.inbox),
+            "backlog_size": len(observation.inbox),
+            "action_trace": self._action_history[-1].model_dump(mode="json"),
+            "seed": self._seed,
+            "scheduled_events": self._engine.event_queue.snapshot(),
+            "triggered_events": triggered_events,
+            "system_state": dict(self._system_state),
+            "events_triggered": triggered_events,
+            "emails_pending": len(observation.inbox),
+            "step": self._step_index,
+            "sla_breaches": self._system_state["sla_breaches"],
+            "stress": self._system_state["stress"],
+            "open_actionable_emails": len(self._pending_email_ids()),
+        }
+        if termination_reason is not None:
+            info["termination_reason"] = termination_reason
+        return info
 
     def _apply_action(self, action: Action, reward_components: dict[str, float]) -> dict[str, Any]:
         info: dict[str, Any] = {}
@@ -340,7 +360,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             if email_id not in self._completed_ids
             and self._email_specs[email_id].priority_hint in {"high", "critical"}
         ]
-        return -0.12 if urgent_open else 0.0
+        return EMAIL_TRIAGE_CONFIG.urgent_wait_penalty if urgent_open else 0.0
 
     def _deadline_penalties(self) -> dict[str, float]:
         penalties: dict[str, float] = {}
@@ -349,14 +369,20 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 continue
             spec = self._email_specs[email_id]
             if self._step_index > spec.classification_deadline and email_id not in self._classifications:
-                penalties["missed_classification"] = penalties.get("missed_classification", 0.0) - 0.1
+                penalties["missed_classification"] = (
+                    penalties.get("missed_classification", 0.0) + EMAIL_TRIAGE_CONFIG.missed_classification_penalty
+                )
             if spec.requires_response and self._step_index > spec.response_deadline and email_id not in self._responses:
-                penalties["missed_response"] = penalties.get("missed_response", 0.0) - 0.15
+                penalties["missed_response"] = (
+                    penalties.get("missed_response", 0.0) + EMAIL_TRIAGE_CONFIG.missed_response_penalty
+                )
             should_escalate = spec.requires_escalation or (
                 spec.escalation_trigger_step is not None and self._step_index >= spec.escalation_trigger_step
             )
             if should_escalate and self._step_index > spec.escalation_deadline and email_id not in self._escalations:
-                penalties["missed_escalation"] = penalties.get("missed_escalation", 0.0) - 0.2
+                penalties["missed_escalation"] = (
+                    penalties.get("missed_escalation", 0.0) + EMAIL_TRIAGE_CONFIG.missed_escalation_penalty
+                )
         return penalties
 
     def _is_terminal_email(self, email_id: str) -> bool:
@@ -371,9 +397,38 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         escalated = (not should_escalate) or email_id in self._escalations
         return classified and responded and escalated
 
-    def _is_done(self) -> bool:
-        critical_failure = self._system_state["stress"] > 100.0
-        return self._step_index >= self.task.max_steps or critical_failure
+    def _termination_reason(self) -> str | None:
+        if self._system_state["stress"] > EMAIL_TRIAGE_CONFIG.system_collapse_stress:
+            return "system_collapse"
+        if EMAIL_TRIAGE_CONFIG.stable_resolution_ends_episode and self._is_stably_resolved():
+            return "stable_resolution"
+        if self._step_index >= self.task.max_steps:
+            return "max_steps"
+        return None
+
+    def _is_stably_resolved(self) -> bool:
+        if self._step_index == 0:
+            return False
+        if self._pending_email_ids():
+            return False
+        if any(spec.arrival_step > self._step_index for spec in self._email_specs.values()):
+            return False
+        return not self._has_meaningful_future_events()
+
+    def _pending_email_ids(self) -> list[str]:
+        return [email_id for email_id in self._visible_ids if email_id not in self._completed_ids]
+
+    def _has_meaningful_future_events(self) -> bool:
+        unresolved = set(self._pending_email_ids())
+        for event in self._engine.event_queue.snapshot():
+            if event["event_type"] == "system_overload":
+                return True
+            email_id = event["payload"].get("email_id")
+            if email_id is None:
+                continue
+            if email_id in unresolved:
+                return True
+        return False
 
     def _summarize_action(self, action: Action) -> str:
         if action.action_type == "wait":
@@ -387,20 +442,33 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
 
     def _observed_view(self, spec: EmailSpec) -> Any:
         hint = self._observed_priority(spec)
-        return spec.to_view(self._step_index, seen=True).model_copy(update={"priority_hint": hint})
+        observed_noise = self._observed_noise(spec)
+        return spec.to_view(self._step_index, seen=True).model_copy(
+            update={"priority_hint": hint, "noise_score": observed_noise}
+        )
 
     def _observed_priority(self, spec: EmailSpec) -> str:
         subject = spec.subject.lower()
         sender = spec.sender.lower()
-        if any(token in subject for token in ("outage", "failing", "global", "urgent")):
+        if any(token in subject for token in ("checkout", "all regions", "global", "production outage")):
+            return "critical"
+        if any(token in subject for token in ("outage", "failing", "timeout", "urgent")):
             return "high"
         if any(token in sender for token in ("ceo@", "vip@", "noc@")):
             return "high"
-        if spec.noise_score > 0.8:
+        if spec.noise_score > 0.85:
             return "low"
         if any(token in subject for token in ("migration", "review", "status")):
             return "medium"
         return "medium"
+
+    def _observed_noise(self, spec: EmailSpec) -> float:
+        text = f"{spec.subject} {spec.body}".lower()
+        if any(token in text for token in ("newsletter", "webinar", "unsubscribe", "offer", "sponsorship")):
+            return 0.9
+        if any(token in text for token in ("outage", "timeout", "checkout", "payroll", "migration")):
+            return 0.2
+        return 0.5
 
     def _process_due_events(self, reward_components: dict[str, float]) -> list[dict[str, Any]]:
         def _handle(event: ScheduledEvent) -> None:
@@ -461,8 +529,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             self._schedule_penalty(spec, delay=2, reason="false_alarm", amount=-0.5, stress=1.0)
 
     def _schedule_penalty(self, spec: EmailSpec, delay: int, reason: str, amount: float, stress: float = 0.0) -> None:
-        self._engine.schedule_in(
-            current_tick=self._step_index,
+        self._schedule_relative_event(
             delay=delay,
             event_type="penalty",
             payload={
@@ -477,18 +544,14 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
     def _schedule_sla_breach(self, spec: EmailSpec) -> None:
         if spec.deadline_step is None:
             return
-        self._engine.event_queue.schedule(
-            ScheduledEvent(
-                tick=spec.deadline_step,
-                priority=0,
-                event_type="sla_breach",
-                payload={"email_id": spec.email_id},
-            )
+        self._schedule_absolute_event(
+            tick=spec.deadline_step,
+            event_type="sla_breach",
+            payload={"email_id": spec.email_id},
         )
 
     def _schedule_escalation(self, spec: EmailSpec, delay: int) -> None:
-        self._engine.schedule_in(
-            current_tick=self._step_index,
+        self._schedule_relative_event(
             delay=delay,
             event_type="escalation",
             payload={"email_id": spec.email_id},
@@ -519,8 +582,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             "escalation_deadline": self._step_index + delay + 4,
             "deadline_step": self._step_index + delay + random.randint(3, 7),
         }
-        self._engine.schedule_in(
-            current_tick=self._step_index,
+        self._schedule_relative_event(
             delay=delay,
             event_type="followup_email",
             payload=payload,
@@ -535,8 +597,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
     def _maybe_schedule_system_overload(self) -> None:
         if self._system_state["sla_breaches"] >= 3.0 and not self._overload_triggered:
             self._overload_triggered = True
-            self._engine.schedule_in(
-                current_tick=self._step_index,
+            self._schedule_relative_event(
                 delay=1,
                 event_type="system_overload",
                 payload={},
@@ -571,3 +632,36 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 deadline_step=base_step + offset + random.randint(3, 7),
             )
             self._register_email(spec)
+
+    def _schedule_relative_event(
+        self,
+        *,
+        delay: int,
+        event_type: str,
+        payload: dict[str, Any],
+        priority: int = 0,
+    ) -> None:
+        self._schedule_absolute_event(
+            tick=self._step_index + delay,
+            event_type=event_type,
+            payload=payload,
+            priority=priority,
+        )
+
+    def _schedule_absolute_event(
+        self,
+        *,
+        tick: int,
+        event_type: str,
+        payload: dict[str, Any],
+        priority: int = 0,
+    ) -> None:
+        self._event_counter += 1
+        self._engine.event_queue.schedule(
+            ScheduledEvent(
+                tick=tick,
+                priority=priority,
+                event_type=event_type,
+                payload=payload,
+            )
+        )
