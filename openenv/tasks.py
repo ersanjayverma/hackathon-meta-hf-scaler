@@ -479,6 +479,31 @@ def _task_three_grade(trajectory: list[StepRecord]) -> float:
     return max(0.0, min(1.0, score))
 
 
+def _generic_task_grade(trajectory: list[StepRecord]) -> float:
+    if not trajectory:
+        return 0.0
+    final_step = trajectory[-1]
+    unique_emails = {
+        step.action.email_id
+        for step in trajectory
+        if step.action.email_id is not None
+    }
+    action_types = {step.action.action_type for step in trajectory}
+    completion_ratio = min(len(final_step.observation.completed_email_ids) / max(len(unique_emails), 1), 1.0)
+    progress_bonus = min(len(unique_emails) / 5.0, 0.3)
+    action_bonus = 0.0
+    if "classify" in action_types:
+        action_bonus += 0.2
+    if "respond" in action_types:
+        action_bonus += 0.2
+    if "escalate" in action_types:
+        action_bonus += 0.1
+    penalty = min(sum(1 for step in trajectory if step.info.get("loop_detected")) * 0.05, 0.2)
+    if final_step.info.get("termination_reason") == "system_collapse":
+        penalty += 0.25
+    return max(0.0, min(1.0, completion_ratio * 0.4 + progress_bonus + action_bonus - penalty))
+
+
 def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
     graders = {
         "task_easy_classification": _task_one_grade,
@@ -494,4 +519,6 @@ def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
             graders[task.name] = _task_two_grade
         elif task.name.startswith("task_hard_thread_reasoning"):
             graders[task.name] = _task_three_grade
+        else:
+            graders[task.name] = _generic_task_grade
     return graders

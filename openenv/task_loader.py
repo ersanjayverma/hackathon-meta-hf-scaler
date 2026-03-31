@@ -44,7 +44,14 @@ def load_task_scenarios(path: str | Path) -> TaskLoadReport:
     if not scenario_path.exists():
         return report
 
-    file_paths = sorted(scenario_path.glob("*.json")) if scenario_path.is_dir() else [scenario_path]
+    if scenario_path.is_dir():
+        file_paths = sorted(
+            file_path
+            for file_path in scenario_path.glob("*.json")
+            if not file_path.name.endswith(".schema.json")
+        )
+    else:
+        file_paths = [scenario_path]
     seen_names = set()
     for file_path in file_paths:
         _load_single_file(file_path, report, seen_names)

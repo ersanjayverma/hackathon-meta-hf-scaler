@@ -15,7 +15,6 @@ dependencies = [
   "pydantic>=2.7",
   "prometheus-client>=0.20",
   "PyYAML>=6.0",
-  "torch>=2.3.0",
   "uvicorn>=0.30",
 ]
 
