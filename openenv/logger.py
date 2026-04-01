@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -30,7 +31,8 @@ class StructuredLogger:
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.name)
-        self._logger.setLevel(logging.INFO)
+        level_name = os.environ.get("OPENENV_LOG_LEVEL", "WARNING").upper()
+        self._logger.setLevel(getattr(logging, level_name, logging.WARNING))
         self._logger.propagate = False
         if not self._logger.handlers:
             stream_handler = logging.StreamHandler(sys.stdout)

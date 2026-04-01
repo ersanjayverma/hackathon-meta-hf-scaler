@@ -32,7 +32,7 @@ metadata:
 
 service:
   sdk: docker
-  app_file: app.py
+  app_file: server/app.py
   port: 7860
   healthcheck:
     path: /
