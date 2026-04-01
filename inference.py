@@ -103,36 +103,24 @@ def _build_openai_classifier(model_name: str):
     return lambda observation: choose_action(client, observation, model_name)
 
 
-def _next_classification_action(
+def _next_action(
     observation: Observation,
-    processed_email_ids: set[str],
     backend: str,
     heuristic_agent: HeuristicAgent,
     llm_classifier,
-) -> Action | None:
-    candidates = _visible_unprocessed_emails(observation, processed_email_ids)
-    if not candidates:
-        return None
-
-    next_email = candidates[0]
-    fallback_action = Action(
-        action_type="classify",
-        email_id=next_email.email_id,
-        category=_infer_category(heuristic_agent, next_email),
-    )
+) -> Action:
+    fallback_action = heuristic_agent.act(observation)
 
     if backend != "openai":
         return fallback_action
 
     suggested_action = llm_classifier(observation)
-    if (
-        suggested_action.action_type == "classify"
-        and suggested_action.email_id is not None
-        and suggested_action.email_id not in processed_email_ids
-        and any(email.email_id == suggested_action.email_id for email in candidates)
-    ):
-        return suggested_action
-    return fallback_action
+    visible_email_ids = {email.email_id for email in observation.inbox}
+    if suggested_action.action_type == "wait":
+        return suggested_action if not visible_email_ids else fallback_action
+    if suggested_action.email_id is None or suggested_action.email_id not in visible_email_ids:
+        return fallback_action
+    return suggested_action
 
 
 def _task_email_ids(task) -> set[str]:
@@ -145,8 +133,8 @@ def _run_task(task, backend: str, model_name: str, heuristic_agent: HeuristicAge
     if env_logger is not None:
         env_logger.setLevel(logging.CRITICAL + 1)
 
-    all_email_ids = _task_email_ids(task)
     processed_email_ids: set[str] = set()
+    all_email_ids: set[str] = set()
     rewards: list[float] = []
     steps_taken = 0
     success = False
@@ -155,40 +143,32 @@ def _run_task(task, backend: str, model_name: str, heuristic_agent: HeuristicAge
 
     try:
         observation = env.reset()
+        state = env.state()
+        processed_email_ids = set(state.get("processed_email_ids", []))
+        all_email_ids = processed_email_ids | set(state.get("remaining_email_ids", []))
 
         if not all_email_ids:
             success = True
             return
 
-        while processed_email_ids != all_email_ids:
-            action = _next_classification_action(
+        done = False
+        while processed_email_ids != all_email_ids or not done:
+            action = _next_action(
                 observation=observation,
-                processed_email_ids=processed_email_ids,
                 backend=backend,
                 heuristic_agent=heuristic_agent,
                 llm_classifier=llm_classifier,
             )
 
-            if action is None:
-                unseen_remaining = all_email_ids - processed_email_ids
-                visible_ids = {email.email_id for email in observation.inbox}
-                if unseen_remaining and not (unseen_remaining & visible_ids):
-                    action = Action(action_type="wait")
-                else:
-                    break
-
-            if action.email_id is not None and action.email_id in processed_email_ids:
-                break
-
             observation, reward, done, info = env.step(action)
             reward_value = float(reward.total)
             rewards.append(reward_value)
             steps_taken += 1
-            if action.action_type == "classify" and action.email_id is not None:
-                processed_email_ids.add(action.email_id)
             error = info.get("last_action_error")
             _log_step(steps_taken, action, reward_value, done, error if isinstance(error, str) else None)
-
+            state = env.state()
+            processed_email_ids = set(state.get("processed_email_ids", []))
+            all_email_ids = all_email_ids | processed_email_ids | set(state.get("remaining_email_ids", []))
             if done:
                 break
 
@@ -204,14 +184,14 @@ def main() -> None:
     heuristic_agent = HeuristicAgent()
     llm_classifier = _build_openai_classifier(model_name) if backend == "openai" else None
 
-    for task in _select_tasks():
-        _run_task(
-            task=task,
-            backend=backend,
-            model_name=model_name,
-            heuristic_agent=heuristic_agent,
-            llm_classifier=llm_classifier,
-        )
+    task = _select_tasks()[0]
+    _run_task(
+        task=task,
+        backend=backend,
+        model_name=model_name,
+        heuristic_agent=heuristic_agent,
+        llm_classifier=llm_classifier,
+    )
 
 
 if __name__ == "__main__":

@@ -147,7 +147,12 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
 
     def state(self) -> dict:
         with self._lock:
+            processed_email_ids = set(self._completed_ids)
+            all_email_ids = set(self._email_specs)
             return {
+                "processed_email_ids": list(processed_email_ids),
+                "remaining_email_ids": sorted(all_email_ids - processed_email_ids),
+                "steps_taken": self._step_index,
                 "task": self.task.model_dump(mode="json"),
                 "seed": self._seed,
                 "step_index": self._step_index,

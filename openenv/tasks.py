@@ -542,25 +542,34 @@ def _generic_task_grade(trajectory: list[StepRecord]) -> float:
     return max(0.0, min(1.0, completion_ratio * 0.4 + progress_bonus + action_bonus - penalty))
 
 
+def grade_task(processed_ids, expected_ids):
+    correct = len(set(processed_ids) & set(expected_ids))
+    total = len(expected_ids)
+    return correct / total if total > 0 else 1.0
+
+
+def _expected_ids_for_task(task: Task) -> list[str]:
+    return [str(email["email_id"]) for email in task.initial_state.get("emails", [])]
+
+
+def _processed_ids_from_trajectory(trajectory: list[StepRecord]) -> list[str]:
+    if not trajectory:
+        return []
+    return list(trajectory[-1].observation.completed_email_ids)
+
+
+def _build_task_grader(task: Task) -> Callable[[list[StepRecord]], float]:
+    expected_ids = _expected_ids_for_task(task)
+
+    def _grader(trajectory: list[StepRecord]) -> float:
+        return float(grade_task(_processed_ids_from_trajectory(trajectory), expected_ids))
+
+    return _grader
+
+
 def get_benchmark_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
-    return {
-        "task_easy_classification": _task_one_grade,
-        "task_medium_prioritization": _task_two_grade,
-        "task_hard_thread_reasoning": _task_three_grade,
-    }
+    return {task.name: _build_task_grader(task) for task in get_benchmark_tasks()}
 
 
 def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
-    graders = dict(get_benchmark_graders())
-    for task in get_email_tasks(include_supplemental=True):
-        if task.name in graders:
-            continue
-        if task.name.startswith("task_easy_classification"):
-            graders[task.name] = _task_one_grade
-        elif task.name.startswith("task_medium_prioritization"):
-            graders[task.name] = _task_two_grade
-        elif task.name.startswith("task_hard_thread_reasoning"):
-            graders[task.name] = _task_three_grade
-        else:
-            graders[task.name] = _generic_task_grade
-    return graders
+    return {task.name: _build_task_grader(task) for task in get_email_tasks(include_supplemental=True)}
