@@ -239,6 +239,21 @@ Default `inference.py` backend selection:
 2. `openai` if `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` are all present
 3. otherwise internal deterministic `heuristic`
 
+`inference.py` runs one canonical benchmark episode and emits the required submission line protocol:
+
+```text
+[START] task=<task_name> env=<benchmark> model=<model_name>
+[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+[END] success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+```
+
+Notes:
+
+- default task: `task_easy_classification`
+- override task with `OPENENV_TASK=<canonical_task_name>`
+- `success` is derived from the canonical task grader
+- the script prints only these line types to stdout
+
 ## Validation and tests
 
 Run the full reviewer path:

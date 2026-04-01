@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib.util
 import io
-import json
 import sys
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -16,25 +15,66 @@ sys.modules[MODULE_SPEC.name] = inference_module
 MODULE_SPEC.loader.exec_module(inference_module)
 
 
-def test_inference_main_prints_results(monkeypatch, tmp_path) -> None:
-    monkeypatch.setattr(
-        inference_module,
-        "run_baseline",
-        lambda **_: {
-            "model": "test-model",
-            "backend": "heuristic",
-            "average_score": 1.0,
-            "tasks": [{"task": "task_easy_classification", "score": 1.0}],
-            "api_failures": 0,
-            "fallback_actions": 0,
-        },
-    )
+class FakeReward:
+    def __init__(self, total: float) -> None:
+        self.total = total
+
+
+class FakeObservation:
+    inbox: list[object] = []
+
+
+class FakeEnv:
+    def __init__(self, task, seed: int | None = None) -> None:
+        self.task = task
+        self.seed = seed
+        self.trajectory = ["trajectory"]
+        self._step_index = 0
+
+    def reset(self):
+        self._step_index = 0
+        return FakeObservation()
+
+    def step(self, action):
+        self._step_index += 1
+        done = self._step_index >= 2
+        return FakeObservation(), FakeReward(0.5), done, {}
+
+    def close(self) -> None:
+        return None
+
+
+class FakeTask:
+    def __init__(self, name: str, seed: int = 101) -> None:
+        self.name = name
+        self.seed = seed
+
+
+def test_inference_main_emits_required_line_protocol(monkeypatch) -> None:
+    fake_task = FakeTask("task_easy_classification")
+    actions = [
+        inference_module.Action(action_type="classify", email_id="e-001", category="spam"),
+        inference_module.Action(action_type="ignore", email_id="e-001"),
+    ]
+
+    monkeypatch.setattr(inference_module, "EmailTriageEnv", FakeEnv)
+    monkeypatch.setattr(inference_module, "get_benchmark_tasks", lambda: [fake_task])
+    monkeypatch.setattr(inference_module, "get_benchmark_task_names", lambda: (fake_task.name,))
+    monkeypatch.setattr(inference_module, "get_benchmark_graders", lambda: {fake_task.name: lambda _: 1.0})
+    monkeypatch.setattr(inference_module, "_build_action_selector", lambda _: lambda __: actions.pop(0))
+    monkeypatch.delenv("OPENENV_TASK", raising=False)
+
     output = io.StringIO()
     with redirect_stdout(output):
         inference_module.main()
-    payload = json.loads(output.getvalue())
-    assert payload["average_score"] == 1.0
-    assert payload["backend"] == "heuristic"
+
+    lines = output.getvalue().strip().splitlines()
+    assert lines == [
+        "[START] task=task_easy_classification env=email_triage_benchmark model=heuristic-v1",
+        "[STEP] step=1 action=classify('e-001','spam') reward=0.50 done=false error=null",
+        "[STEP] step=2 action=ignore('e-001') reward=0.50 done=true error=null",
+        "[END] success=true steps=2 rewards=0.50,0.50",
+    ]
 
 
 def test_resolve_backend_prefers_explicit_env(monkeypatch) -> None:
