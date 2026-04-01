@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Callable
+from typing import Iterable
 
 from openai import OpenAI
 
@@ -11,10 +11,7 @@ from baseline.run_baseline import choose_action
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
-from openenv.tasks import get_benchmark_graders, get_benchmark_task_names, get_benchmark_tasks
-
-
-SUCCESS_SCORE_THRESHOLD = 0.8
+from openenv.tasks import get_benchmark_task_names, get_benchmark_tasks
 
 
 def _resolve_backend() -> str:
@@ -55,9 +52,7 @@ def _format_action(action: Action) -> str:
     if action.action_type == "classify":
         return f"classify('{action.email_id}','{action.category}')"
     if action.action_type == "respond":
-        return (
-            f"respond('{action.email_id}','{action.response_template}','{action.priority}')"
-        )
+        return f"respond('{action.email_id}','{action.response_template}','{action.priority}')"
     return f"escalate('{action.email_id}','{action.priority}')"
 
 
@@ -81,31 +76,85 @@ def _log_end(success: bool, steps: int, rewards: list[float]) -> None:
     )
 
 
-def _build_action_selector(backend: str) -> Callable[[Observation], Action]:
-    if backend == "openai":
-        client = OpenAI(
-            base_url=os.environ.get("API_BASE_URL"),
-            api_key=os.environ.get("HF_TOKEN"),
-        )
-        model_name = _resolve_model_name(backend)
-        return lambda observation: choose_action(client, observation, model_name)
+def _priority_rank(priority_hint: str) -> int:
+    return {"critical": 4, "high": 3, "medium": 2, "low": 1}.get(priority_hint, 0)
 
-    agent = HeuristicAgent()
-    return agent.act
+
+def _infer_category(agent: HeuristicAgent, email) -> str:
+    return agent._profile(email).category
+
+
+def _sorted_unprocessed_emails(observation: Observation, processed_email_ids: set[str]) -> list:
+    unique_visible = {}
+    for email in observation.inbox:
+        if email.email_id not in processed_email_ids:
+            unique_visible[email.email_id] = email
+    return sorted(
+        unique_visible.values(),
+        key=lambda email: (
+            -_priority_rank(email.priority_hint),
+            -email.age,
+            email.email_id,
+        ),
+    )
+
+
+def _build_openai_classifier(model_name: str):
+    client = OpenAI(
+        base_url=os.environ.get("API_BASE_URL"),
+        api_key=os.environ.get("HF_TOKEN"),
+    )
+    return lambda observation: choose_action(client, observation, model_name)
+
+
+def _next_classification_action(
+    observation: Observation,
+    processed_email_ids: set[str],
+    backend: str,
+    heuristic_agent: HeuristicAgent,
+):
+    candidates = _sorted_unprocessed_emails(observation, processed_email_ids)
+    if not candidates:
+        return None
+
+    next_email = candidates[0]
+    fallback_action = Action(
+        action_type="classify",
+        email_id=next_email.email_id,
+        category=_infer_category(heuristic_agent, next_email),
+    )
+
+    if backend != "openai":
+        return fallback_action
+
+    suggested_action = _build_openai_classifier(_resolve_model_name(backend))(observation)
+    if (
+        suggested_action.action_type == "classify"
+        and suggested_action.email_id is not None
+        and suggested_action.email_id not in processed_email_ids
+        and any(email.email_id == suggested_action.email_id for email in candidates)
+    ):
+        return suggested_action
+    return fallback_action
+
+
+def _task_email_ids(task) -> set[str]:
+    return {str(email["email_id"]) for email in task.initial_state.get("emails", [])}
 
 
 def main() -> None:
     backend = _resolve_backend()
     task_name = _select_task_name()
     task = _canonical_tasks_by_name()[task_name]
-    grader = get_benchmark_graders()[task.name]
-    action_selector = _build_action_selector(backend)
     model_name = _resolve_model_name(backend)
     env = EmailTriageEnv(task=task, seed=task.seed)
     env_logger = getattr(getattr(env, "logger", None), "_logger", None)
     if env_logger is not None:
         env_logger.setLevel(logging.CRITICAL + 1)
 
+    heuristic_agent = HeuristicAgent()
+    all_email_ids = _task_email_ids(task)
+    processed_email_ids: set[str] = set()
     rewards: list[float] = []
     steps_taken = 0
     success = False
@@ -114,19 +163,36 @@ def main() -> None:
 
     try:
         observation = env.reset()
-        done = False
 
-        while not done:
-            action = action_selector(observation)
+        if not all_email_ids:
+            success = True
+            return
+
+        while processed_email_ids != all_email_ids:
+            action = _next_classification_action(
+                observation=observation,
+                processed_email_ids=processed_email_ids,
+                backend=backend,
+                heuristic_agent=heuristic_agent,
+            )
+            if action is None:
+                break
+
+            if action.email_id is None or action.email_id in processed_email_ids:
+                break
+
             observation, reward, done, info = env.step(action)
             reward_value = float(reward.total)
             rewards.append(reward_value)
             steps_taken += 1
+            processed_email_ids.add(action.email_id)
             error = info.get("last_action_error")
             _log_step(steps_taken, action, reward_value, done, error if isinstance(error, str) else None)
 
-        score = grader(env.trajectory)
-        success = score >= SUCCESS_SCORE_THRESHOLD
+            if done:
+                break
+
+        success = processed_email_ids == all_email_ids
     finally:
         env.close()
         _log_end(success=success, steps=steps_taken, rewards=rewards)

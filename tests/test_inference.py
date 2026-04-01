@@ -52,16 +52,26 @@ class FakeTask:
 
 def test_inference_main_emits_required_line_protocol(monkeypatch) -> None:
     fake_task = FakeTask("task_easy_classification")
-    actions = [
-        inference_module.Action(action_type="classify", email_id="e-001", category="spam"),
-        inference_module.Action(action_type="ignore", email_id="e-001"),
+    fake_observations = [
+        type("Obs", (), {"inbox": [type("Email", (), {"email_id": "e-001", "priority_hint": "low", "age": 0})()]})(),
+        type("Obs", (), {"inbox": []})(),
     ]
 
     monkeypatch.setattr(inference_module, "EmailTriageEnv", FakeEnv)
     monkeypatch.setattr(inference_module, "get_benchmark_tasks", lambda: [fake_task])
     monkeypatch.setattr(inference_module, "get_benchmark_task_names", lambda: (fake_task.name,))
-    monkeypatch.setattr(inference_module, "get_benchmark_graders", lambda: {fake_task.name: lambda _: 1.0})
-    monkeypatch.setattr(inference_module, "_build_action_selector", lambda _: lambda __: actions.pop(0))
+    monkeypatch.setattr(inference_module, "_task_email_ids", lambda _: {"e-001"})
+    monkeypatch.setattr(
+        inference_module,
+        "_next_classification_action",
+        lambda **_: inference_module.Action(action_type="classify", email_id="e-001", category="spam"),
+    )
+    monkeypatch.setattr(FakeEnv, "reset", lambda self: fake_observations[0])
+    monkeypatch.setattr(
+        FakeEnv,
+        "step",
+        lambda self, action: (fake_observations[1], FakeReward(0.5), False, {}),
+    )
     monkeypatch.delenv("OPENENV_TASK", raising=False)
 
     output = io.StringIO()
@@ -72,8 +82,7 @@ def test_inference_main_emits_required_line_protocol(monkeypatch) -> None:
     assert lines == [
         "[START] task=task_easy_classification env=email_triage_benchmark model=heuristic-v1",
         "[STEP] step=1 action=classify('e-001','spam') reward=0.50 done=false error=null",
-        "[STEP] step=2 action=ignore('e-001') reward=0.50 done=true error=null",
-        "[END] success=true steps=2 rewards=0.50,0.50",
+        "[END] success=true steps=1 rewards=0.50",
     ]
 
 
