@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from threading import RLock
@@ -16,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from baseline.run_baseline import run_baseline
 from environments.email_triage_env import EmailTriageEnv
 from openenv.models import Action, Observation, Reward, StepRecord
+from openenv.runtime_config import DEFAULT_PORT, runtime_port
 from openenv.tasks import (
     Task,
     get_benchmark_task_names,
@@ -225,7 +225,7 @@ def grader(payload: GraderRequest) -> dict[str, float | str]:
 
 
 def main() -> None:
-    uvicorn.run(app, host="0.0.0.0", port=int(os.environ.get("PORT", "7860")))
+    uvicorn.run(app, host="0.0.0.0", port=runtime_port(DEFAULT_PORT))
 
 
 if __name__ == "__main__":

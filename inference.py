@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Callable
 
 from openai import OpenAI
@@ -11,26 +10,47 @@ from baseline.run_baseline import choose_action
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
+from openenv.runtime_config import (
+    API_BASE_URL,
+    BENCHMARK,
+    MAX_STEPS,
+    MAX_TOKENS,
+    MODEL_NAME,
+    SUCCESS_SCORE_THRESHOLD,
+    TASK_NAME,
+    TEMPERATURE,
+    runtime_api_base_url,
+    runtime_baseline_backend,
+    runtime_benchmark_name,
+    runtime_hf_token,
+    runtime_model_name,
+    runtime_task_name,
+)
 from openenv.tasks import Task, get_benchmark_task_names, get_benchmark_tasks
-
-# External harnesses expect these names to exist at module scope.
-API_BASE_URL = os.getenv("API_BASE_URL") or "https://router.huggingface.co/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME = os.getenv("MY_ENV_V4_TASK", "echo")
-BENCHMARK = os.getenv("MY_ENV_V4_BENCHMARK", "my_env_v4")
-MAX_STEPS = 8
-TEMPERATURE = 0.7
-MAX_TOKENS = 150
-SUCCESS_SCORE_THRESHOLD = 0.1
 
 Classifier = Callable[[Observation], Action]
 
 
+def _validate_runtime_config() -> None:
+    if not runtime_api_base_url(API_BASE_URL):
+        raise ValueError("API_BASE_URL must be configured")
+    if not runtime_model_name(MODEL_NAME):
+        raise ValueError("MODEL_NAME must be configured")
+    if MAX_STEPS <= 0:
+        raise ValueError("MAX_STEPS must be positive")
+    if TEMPERATURE < 0.0:
+        raise ValueError("TEMPERATURE must be non-negative")
+    if MAX_TOKENS <= 0:
+        raise ValueError("MAX_TOKENS must be positive")
+    if not 0.0 <= SUCCESS_SCORE_THRESHOLD <= 1.0:
+        raise ValueError("SUCCESS_SCORE_THRESHOLD must be between 0.0 and 1.0")
+
+
 def _resolve_backend() -> str:
-    explicit_backend = os.environ.get("OPENENV_BASELINE_BACKEND")
+    explicit_backend = runtime_baseline_backend()
     if explicit_backend:
         return explicit_backend.strip().lower()
-    if API_BASE_URL and MODEL_NAME and os.environ.get("HF_TOKEN"):
+    if runtime_api_base_url(API_BASE_URL) and runtime_model_name(MODEL_NAME) and runtime_hf_token():
         return "openai"
     return "heuristic"
 
@@ -40,7 +60,7 @@ def _canonical_tasks_by_name() -> dict[str, Task]:
 
 
 def _select_tasks() -> list[Task]:
-    requested_task = os.environ.get("OPENENV_TASK")
+    requested_task = runtime_task_name(TASK_NAME)
     tasks_by_name = _canonical_tasks_by_name()
     if requested_task and requested_task in tasks_by_name:
         return [tasks_by_name[requested_task]]
@@ -49,7 +69,7 @@ def _select_tasks() -> list[Task]:
 
 def _resolve_model_name(backend: str) -> str:
     if backend == "openai":
-        return MODEL_NAME or BENCHMARK_METADATA.default_model
+        return runtime_model_name(MODEL_NAME) or BENCHMARK_METADATA.default_model
     return "heuristic-v1"
 
 
@@ -85,10 +105,17 @@ def _log_end(success: bool, steps: int, rewards: list[float]) -> None:
     )
 
 
+def _resolve_benchmark_name() -> str:
+    configured_benchmark = runtime_benchmark_name(BENCHMARK)
+    if configured_benchmark == BENCHMARK:
+        return BENCHMARK_METADATA.benchmark_name
+    return configured_benchmark
+
+
 def _build_openai_classifier(model_name: str) -> Classifier:
     client = OpenAI(
-        base_url=API_BASE_URL,
-        api_key=os.environ.get("HF_TOKEN"),
+        base_url=runtime_api_base_url(API_BASE_URL),
+        api_key=runtime_hf_token(),
     )
 
     def classify(observation: Observation) -> Action:
@@ -151,8 +178,9 @@ def _run_task(
     rewards: list[float] = []
     steps_taken = 0
     success = False
+    step_budget = max(int(getattr(task, "max_steps", 0) or 0), MAX_STEPS)
 
-    _log_start(task=task.name, env_name=BENCHMARK_METADATA.benchmark_name, model=model_name)
+    _log_start(task=task.name, env_name=_resolve_benchmark_name(), model=model_name)
 
     try:
         observation = env.reset()
@@ -163,7 +191,7 @@ def _run_task(
             return
 
         done = False
-        while processed_email_ids != all_email_ids or not done:
+        while steps_taken < step_budget and (processed_email_ids != all_email_ids or not done):
             action = _next_action(
                 observation=observation,
                 backend=backend,
@@ -182,13 +210,16 @@ def _run_task(
             if done:
                 break
 
-        success = processed_email_ids == all_email_ids
+        success = processed_email_ids == all_email_ids and (
+            len(processed_email_ids) / max(len(all_email_ids), 1) >= SUCCESS_SCORE_THRESHOLD
+        )
     finally:
         env.close()
         _log_end(success=success, steps=steps_taken, rewards=rewards)
 
 
 def main() -> None:
+    _validate_runtime_config()
     backend = _resolve_backend()
     model_name = _resolve_model_name(backend)
     heuristic_agent = HeuristicAgent()

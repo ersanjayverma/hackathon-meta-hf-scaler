@@ -2,11 +2,12 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
+
+from .runtime_config import DEFAULT_LOG_LEVEL, runtime_log_level
 
 
 class JsonFormatter(logging.Formatter):
@@ -31,7 +32,7 @@ class StructuredLogger:
 
     def __post_init__(self) -> None:
         self._logger = logging.getLogger(self.name)
-        level_name = os.environ.get("OPENENV_LOG_LEVEL", "WARNING").upper()
+        level_name = runtime_log_level(DEFAULT_LOG_LEVEL)
         self._logger.setLevel(getattr(logging, level_name, logging.WARNING))
         self._logger.propagate = False
         if not self._logger.handlers:

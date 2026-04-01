@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 from pathlib import Path
 from datetime import datetime, timezone
 from typing import Any
@@ -14,6 +13,16 @@ from agents.heuristic_agent import HeuristicAgent
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
+from openenv.runtime_config import (
+    API_BASE_URL,
+    ENV_OPENAI_API_KEY,
+    ENV_OPENENV_BASELINE_BACKEND,
+    MODEL_NAME,
+    runtime_api_base_url,
+    runtime_api_key,
+    runtime_baseline_backend,
+    runtime_model_name,
+)
 from openenv.tasks import (
     get_benchmark_graders,
     get_benchmark_task_names,
@@ -297,7 +306,7 @@ def _reset_runtime_stats() -> None:
 
 
 def _resolve_backend(backend: str | None) -> str:
-    requested = (backend or os.environ.get("OPENENV_BASELINE_BACKEND") or CANONICAL_BASELINE_BACKEND).strip().lower()
+    requested = (backend or runtime_baseline_backend(CANONICAL_BASELINE_BACKEND) or CANONICAL_BASELINE_BACKEND).strip().lower()
     if requested not in OPTIONAL_BASELINE_BACKENDS:
         return CANONICAL_BASELINE_BACKEND
     return requested
@@ -316,14 +325,14 @@ def run_baseline(
     _reset_runtime_stats()
 
     resolved_backend = _resolve_backend(backend)
-    requested_model_name = model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL", BENCHMARK_METADATA.default_model)
+    requested_model_name = model or runtime_model_name(BENCHMARK_METADATA.default_model) or MODEL_NAME
     model_name = requested_model_name if resolved_backend == "openai" else "heuristic-v1"
-    resolved_api_key = api_key if api_key is not None else os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
-    resolved_base_url = base_url if base_url is not None else os.environ.get("API_BASE_URL")
+    resolved_api_key = api_key if api_key is not None else runtime_api_key()
+    resolved_base_url = base_url if base_url is not None else runtime_api_base_url(API_BASE_URL)
     client: OpenAI | None = None
     if resolved_backend == "openai":
         if not resolved_api_key:
-            raise RuntimeError("OPENENV_BASELINE_BACKEND=openai requires HF_TOKEN or OPENAI_API_KEY")
+            raise RuntimeError(f"{ENV_OPENENV_BASELINE_BACKEND}=openai requires HF_TOKEN or {ENV_OPENAI_API_KEY}")
         client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
         verify_openai_api(client, requested_model_name)
     else:
