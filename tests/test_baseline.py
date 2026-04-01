@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from environments.email_triage_env import EmailTriageEnv
-from openenv.tasks import get_email_tasks
+from openenv.tasks import get_benchmark_task_names, get_benchmark_tasks, get_email_tasks
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "baseline" / "run_baseline.py"
 MODULE_SPEC = importlib.util.spec_from_file_location("baseline_run_baseline", MODULE_PATH)
@@ -55,7 +55,7 @@ def test_extract_json_object_from_markdown_fence() -> None:
 
 
 def test_normalize_decision_payload_maps_invalid_values() -> None:
-    task = get_email_tasks()[0]
+    task = get_benchmark_tasks()[0]
     env_observation = EmailTriageEnv(task=task, seed=task.seed).reset()
     normalized = normalize_decision_payload(
         {
@@ -70,7 +70,7 @@ def test_normalize_decision_payload_maps_invalid_values() -> None:
 
 def test_choose_action_falls_back_for_non_json_output() -> None:
     reset_runtime_stats()
-    task = get_email_tasks()[0]
+    task = get_benchmark_tasks()[0]
 
     client = FakeClient("I think this is urgent and needs help immediately.")
     observation = EmailTriageEnv(task=task, seed=task.seed).reset()
@@ -86,7 +86,7 @@ def test_choose_action_falls_back_for_non_json_output() -> None:
 
 def test_choose_action_normalizes_invalid_template_and_priority() -> None:
     reset_runtime_stats()
-    task = get_email_tasks()[1]
+    task = get_benchmark_tasks()[1]
 
     observation = EmailTriageEnv(task=task, seed=task.seed).reset()
     action = choose_action(
@@ -110,7 +110,7 @@ def test_verify_openai_api_uses_ping() -> None:
 
 def test_choose_action_counts_api_failures() -> None:
     reset_runtime_stats()
-    task = get_email_tasks()[0]
+    task = get_benchmark_tasks()[0]
     observation = EmailTriageEnv(task=task, seed=task.seed).reset()
     action = choose_action(FakeClient(RuntimeError("boom")), observation, model="test")
     assert action.action_type == "ignore"
@@ -119,10 +119,16 @@ def test_choose_action_counts_api_failures() -> None:
 
 
 def test_run_baseline_writes_benchmark_metadata(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(baseline_run_baseline, "get_email_tasks", lambda: get_email_tasks()[:1])
-    monkeypatch.setattr(baseline_run_baseline, "get_graders", lambda: {get_email_tasks()[0].name: lambda _: 1.0})
+    benchmark_tasks = get_benchmark_tasks()
+    monkeypatch.setattr(baseline_run_baseline, "get_benchmark_tasks", lambda: benchmark_tasks[:1])
+    monkeypatch.setattr(
+        baseline_run_baseline,
+        "get_benchmark_graders",
+        lambda: {benchmark_tasks[0].name: lambda _: 1.0},
+    )
     monkeypatch.delenv("HF_TOKEN", raising=False)
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENENV_BASELINE_BACKEND", "heuristic")
     result = baseline_run_baseline.run_baseline(
         model="test-model-v1",
         api_key=None,
@@ -131,5 +137,34 @@ def test_run_baseline_writes_benchmark_metadata(tmp_path: Path, monkeypatch) -> 
     )
     metadata = result["metadata"]
     assert metadata["output_schema_version"] == "baseline_results/v2"
-    assert metadata["model_name"] == "test-model-v1"
+    assert metadata["model_name"] == "heuristic-v1"
+    assert metadata["requested_model_name"] == "test-model-v1"
     assert metadata["task_count"] == 1
+    assert result["benchmark"]["canonical"] is True
+    assert result["benchmark"]["task_set"] == "canonical_benchmark"
+
+
+def test_run_baseline_is_deterministic_for_canonical_tasks(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.delenv("HF_TOKEN", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.setenv("OPENENV_BASELINE_BACKEND", "heuristic")
+    first = baseline_run_baseline.run_baseline(output_path=tmp_path / "first.json")
+    second = baseline_run_baseline.run_baseline(output_path=tmp_path / "second.json")
+
+    assert first["backend"] == "heuristic"
+    assert first["average_score"] == 1.0
+    assert second["average_score"] == 1.0
+    assert first["benchmark"]["benchmark_task_names"] == list(get_benchmark_task_names())
+    assert [task["task"] for task in first["tasks"]] == list(get_benchmark_task_names())
+    assert {task["task"]: task["score"] for task in first["tasks"]} == {
+        "task_easy_classification": 1.0,
+        "task_medium_prioritization": 1.0,
+        "task_hard_thread_reasoning": 1.0,
+    }
+    assert [
+        (task["task"], task["difficulty"], task["seed"], task["score"])
+        for task in first["tasks"]
+    ] == [
+        (task["task"], task["difficulty"], task["seed"], task["score"])
+        for task in second["tasks"]
+    ]

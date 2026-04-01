@@ -1,6 +1,6 @@
 name: email_triage_benchmark
 version: 1.0.0
-description: Deterministic email triage benchmark with three real-world support tasks and dense trajectory-aware rewards.
+description: Deterministic email triage benchmark with three canonical real-world support tasks, bounded graders, and dense trajectory-aware rewards.
 metadata:
   author: blackhatbadshah
   license: mit

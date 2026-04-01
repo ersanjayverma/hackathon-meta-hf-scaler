@@ -16,11 +16,19 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 from baseline.run_baseline import run_baseline
 from environments.email_triage_env import EmailTriageEnv
 from openenv.models import Action, Observation, Reward, StepRecord
-from openenv.tasks import Task, get_email_tasks, get_graders
+from openenv.tasks import (
+    Task,
+    get_benchmark_task_names,
+    get_benchmark_tasks,
+    get_email_tasks,
+    get_graders,
+)
 
 request_logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="OpenEnv Email Triage Benchmark", version="1.0.0")
-TASKS = get_email_tasks()
+BENCHMARK_TASKS = get_benchmark_tasks()
+SUPPLEMENTAL_TASKS = get_email_tasks(include_supplemental=True)[len(BENCHMARK_TASKS) :]
+TASKS = BENCHMARK_TASKS + SUPPLEMENTAL_TASKS
 TASKS_BY_NAME = {task.name: task for task in TASKS}
 
 
@@ -46,9 +54,11 @@ class ResetRequest(BaseModel):
 
 
 class BaselineRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
+    model_config = ConfigDict(extra="ignore")
 
     model: str | None = None
+    backend: str | None = None
+    include_supplemental: bool = False
 
 
 class GraderRequest(BaseModel):
@@ -61,7 +71,7 @@ class GraderRequest(BaseModel):
 @dataclass(slots=True)
 class EnvironmentSession:
     tasks: dict[str, Task] = field(default_factory=lambda: dict(TASKS_BY_NAME))
-    current_task_name: str = field(default_factory=lambda: TASKS[0].name)
+    current_task_name: str = field(default_factory=lambda: BENCHMARK_TASKS[0].name)
     env: EmailTriageEnv | None = None
     lock: RLock = field(default_factory=RLock)
 
@@ -134,7 +144,9 @@ def health() -> dict[str, str]:
 @app.get("/tasks")
 def tasks() -> dict[str, Any]:
     return {
-        "tasks": [_task_summary(task) for task in TASKS],
+        "tasks": [_task_summary(task) for task in BENCHMARK_TASKS],
+        "benchmark_task_names": list(get_benchmark_task_names()),
+        "supplemental_tasks": [_task_summary(task) for task in SUPPLEMENTAL_TASKS],
         "action_schema": Action.model_json_schema(),
         "observation_schema": Observation.model_json_schema(),
         "reward_schema": Reward.model_json_schema(),
@@ -183,10 +195,15 @@ def state() -> dict[str, Any]:
 @app.post("/baseline")
 def baseline(payload: BaselineRequest | None = None) -> dict[str, Any]:
     request = payload or BaselineRequest()
-    results = run_baseline(model=request.model)
+    results = run_baseline(
+        model=request.model,
+        backend=request.backend,
+        include_supplemental=request.include_supplemental,
+    )
     return {
         "tasks": results["tasks"],
         "average_score": results["average_score"],
+        "benchmark": results["benchmark"],
         "metadata": {
             "model": results["model"],
             "backend": results["backend"],

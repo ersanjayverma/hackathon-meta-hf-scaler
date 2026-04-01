@@ -14,7 +14,13 @@ from agents.heuristic_agent import HeuristicAgent
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
-from openenv.tasks import get_email_tasks, get_graders
+from openenv.tasks import (
+    get_benchmark_graders,
+    get_benchmark_task_names,
+    get_benchmark_tasks,
+    get_email_tasks,
+    get_graders,
+)
 
 VALID_ACTION_TYPES = {"classify", "respond", "escalate", "ignore", "wait"}
 VALID_PRIORITIES = {"low", "medium", "high", "critical"}
@@ -44,6 +50,8 @@ Never output free text inside enum fields.
 
 logger = logging.getLogger(__name__)
 RUNTIME_STATS = {"api_failures": 0, "fallback_actions": 0}
+CANONICAL_BASELINE_BACKEND = "heuristic"
+OPTIONAL_BASELINE_BACKENDS = {"heuristic", "openai"}
 
 
 def build_safe_default_payload(observation: Observation) -> dict[str, Any]:
@@ -288,41 +296,65 @@ def _reset_runtime_stats() -> None:
     RUNTIME_STATS["fallback_actions"] = 0
 
 
+def _resolve_backend(backend: str | None) -> str:
+    requested = (backend or os.environ.get("OPENENV_BASELINE_BACKEND") or CANONICAL_BASELINE_BACKEND).strip().lower()
+    if requested not in OPTIONAL_BASELINE_BACKENDS:
+        return CANONICAL_BASELINE_BACKEND
+    return requested
+
+
 def run_baseline(
     *,
     model: str | None = None,
     api_key: str | None = None,
     base_url: str | None = None,
     output_path: Path | None = None,
+    backend: str | None = None,
+    include_supplemental: bool = False,
 ) -> dict[str, object]:
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     _reset_runtime_stats()
 
-    model_name = model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL", BENCHMARK_METADATA.default_model)
+    resolved_backend = _resolve_backend(backend)
+    requested_model_name = model or os.environ.get("MODEL_NAME") or os.environ.get("OPENAI_MODEL", BENCHMARK_METADATA.default_model)
+    model_name = requested_model_name if resolved_backend == "openai" else "heuristic-v1"
     resolved_api_key = api_key if api_key is not None else os.environ.get("HF_TOKEN") or os.environ.get("OPENAI_API_KEY")
     resolved_base_url = base_url if base_url is not None else os.environ.get("API_BASE_URL")
-    client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url) if resolved_api_key else None
-    backend = "openai" if client is not None else "heuristic"
-    if client is not None:
-        verify_openai_api(client, model_name)
+    client: OpenAI | None = None
+    if resolved_backend == "openai":
+        if not resolved_api_key:
+            raise RuntimeError("OPENENV_BASELINE_BACKEND=openai requires HF_TOKEN or OPENAI_API_KEY")
+        client = OpenAI(api_key=resolved_api_key, base_url=resolved_base_url)
+        verify_openai_api(client, requested_model_name)
     else:
-        logger.warning("llm_credentials_missing_using_heuristic_baseline")
+        logger.info("using_canonical_heuristic_baseline")
 
-    tasks = get_email_tasks()
+    tasks = get_email_tasks(include_supplemental=True) if include_supplemental else get_benchmark_tasks()
+    graders = get_graders() if include_supplemental else get_benchmark_graders()
     results: dict[str, object] = {
         "model": model_name,
         "base_url": resolved_base_url,
-        "backend": backend,
+        "backend": resolved_backend,
         "tasks": [],
         "average_score": 0.0,
         "api_failures": 0,
         "fallback_actions": 0,
+        "benchmark": {
+            "task_set": "canonical_benchmark" if not include_supplemental else "full_task_catalog",
+            "canonical": not include_supplemental,
+            "benchmark_task_names": list(get_benchmark_task_names()),
+            "evaluated_task_names": [task.name for task in tasks],
+        },
         "metadata": {
             **BENCHMARK_METADATA.to_dict(),
             "model_name": model_name,
+            "requested_model_name": requested_model_name,
             "base_url": resolved_base_url,
-            "backend": backend,
+            "backend": resolved_backend,
+            "canonical_baseline_backend": CANONICAL_BASELINE_BACKEND,
+            "benchmark_mode": "deterministic_canonical" if resolved_backend == "heuristic" and not include_supplemental else "custom",
             "task_count": len(tasks),
+            "include_supplemental": include_supplemental,
             "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         },
     }
@@ -338,7 +370,7 @@ def run_baseline(
 
         while not done:
             if client is not None:
-                action = choose_action(client, observation, model=model_name)
+                action = choose_action(client, observation, model=requested_model_name)
             else:
                 action = heuristic_agent.act(observation)
             observation, reward, done, info = env.step(action)
@@ -356,12 +388,13 @@ def run_baseline(
                 f"reward={reward.total:.2f}"
             )
 
-        score = get_graders()[task.name](env.trajectory)
+        score = graders[task.name](env.trajectory)
         if not 0.0 <= score <= 1.0:
             raise RuntimeError(f"grader for {task.name} returned out-of-range score: {score}")
         scores.append(score)
         task_result = {
             "task": task.name,
+            "difficulty": task.difficulty,
             "seed": task.seed,
             "score": score,
             "total_reward": total_reward,

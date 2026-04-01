@@ -4,7 +4,13 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from environments.email_triage_env import EmailTriageEnv
-from env.codec import DiscreteActionCodec, ObservationEncoder, TextTrajectoryFormatter
+from env.codec import (
+    DiscreteActionCodec,
+    EncoderContext,
+    ObservationEncoder,
+    TextTrajectoryFormatter,
+    action_progress_by_email,
+)
 from env.reward import compute_reward, score_trajectory
 from env.spaces import BoxSpace, DiscreteSpace
 from env.state import AgentAction, EnvironmentState, EnvironmentStepResult
@@ -95,14 +101,22 @@ class OpenEnvGymLikeEnv:
 
     def _state_from_observation(self, observation: Observation) -> EnvironmentState:
         env = self._require_env()
-        action_mask = self._codec.encode_mask(observation)
-        vector = self._encoder.encode(observation)
+        pending_event_count = len(env._engine.event_queue.snapshot())
+        context = EncoderContext(
+            stress=float(env._system_state["stress"]),
+            sla_breaches=float(env._system_state["sla_breaches"]),
+            open_actionable_emails=len(env._pending_email_ids()),
+            pending_event_count=pending_event_count,
+            progress_by_email=action_progress_by_email(observation.action_history),
+        )
+        action_mask = self._codec.encode_mask(observation, context=context)
+        vector = self._encoder.encode(observation, context=context)
         return EnvironmentState(
             observation=observation,
             history_length=len(env.trajectory),
             vector_observation=vector.tolist(),
             action_mask=action_mask.tolist(),
-            text_observation=self._formatter.render(observation),
+            text_observation=self._formatter.render(observation, context=context),
             metadata={
                 "task_name": env.task.name,
                 "max_steps": env.task.max_steps,
@@ -110,6 +124,12 @@ class OpenEnvGymLikeEnv:
                 "seed": env._seed,
                 "action_count": self._codec.action_count,
                 "feature_count": self._encoder.feature_count,
+                "system_stress": context.stress,
+                "sla_breaches": context.sla_breaches,
+                "pending_event_count": context.pending_event_count,
+                "open_actionable_emails": context.open_actionable_emails,
+                "global_feature_labels": list(self._encoder.global_feature_labels),
+                "per_email_feature_labels": list(self._encoder.per_email_feature_labels),
             },
         )
 

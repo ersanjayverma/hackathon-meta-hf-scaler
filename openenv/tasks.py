@@ -7,6 +7,12 @@ from pydantic import Field
 
 from .models import Action, EmailSpec, StepRecord, VersionedModel
 
+CANONICAL_BENCHMARK_TASK_NAMES = (
+    "task_easy_classification",
+    "task_medium_prioritization",
+    "task_hard_thread_reasoning",
+)
+
 
 class Task(VersionedModel):
     name: str
@@ -311,13 +317,20 @@ def _sampled_task_variants() -> list[Task]:
     return samples
 
 
+def get_benchmark_tasks() -> list[Task]:
+    return [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
+
+
+def get_benchmark_task_names() -> tuple[str, ...]:
+    return CANONICAL_BENCHMARK_TASK_NAMES
+
+
 def get_builtin_email_tasks() -> list[Task]:
-    base_tasks = [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
-    return base_tasks + _sampled_task_variants()
+    return get_benchmark_tasks() + _sampled_task_variants()
 
 
-def get_email_tasks(scenarios_path: str | Path | None = None) -> list[Task]:
-    tasks = list(get_builtin_email_tasks())
+def get_supplemental_email_tasks(scenarios_path: str | Path | None = None) -> list[Task]:
+    tasks = list(_sampled_task_variants())
     if scenarios_path is None:
         scenarios_path = Path("scenarios")
     from .task_loader import load_task_scenarios, log_task_load_report
@@ -325,50 +338,75 @@ def get_email_tasks(scenarios_path: str | Path | None = None) -> list[Task]:
     report = load_task_scenarios(scenarios_path)
     if report.issues:
         log_task_load_report(report)
-    return tasks + report.loaded_tasks
+    tasks.extend(report.loaded_tasks)
+    return tasks
+
+
+def get_email_tasks(
+    scenarios_path: str | Path | None = None,
+    *,
+    include_supplemental: bool = True,
+) -> list[Task]:
+    tasks = list(get_benchmark_tasks())
+    if include_supplemental:
+        tasks.extend(get_supplemental_email_tasks(scenarios_path=scenarios_path))
+    return tasks
 
 
 def _task_one_grade(trajectory: list[StepRecord]) -> float:
     if not trajectory:
         return 0.0
-    correct = 0.0
-    penalty = 0.0
-    seen_ids: set[str] = set()
-    for step in trajectory:
-        action = step.action
-        if action.email_id:
-            seen_ids.add(action.email_id)
-        if action.action_type == "classify":
-            if action.email_id == "e-001" and action.category == "spam":
-                correct += 0.5
-            elif action.email_id == "e-002" and action.category == "urgent":
-                correct += 0.5
-            else:
-                penalty += 0.25
-        elif action.action_type != "wait":
-            penalty += 0.1
-    if not {"e-001", "e-002"}.issubset(seen_ids):
-        penalty += 0.2
+    score = 0.0
+    first_non_wait = next((step for step in trajectory if step.action.action_type != "wait"), None)
+    if first_non_wait and first_non_wait.action.email_id == "e-002":
+        score += 0.05
+    if any(
+        step.action.action_type == "classify"
+        and step.action.email_id == "e-001"
+        and step.action.category == "spam"
+        for step in trajectory
+    ):
+        score += 0.15
+    if any(
+        step.action.action_type == "classify"
+        and step.action.email_id == "e-002"
+        and step.action.category == "urgent"
+        for step in trajectory
+    ):
+        score += 0.25
+    if any(
+        step.action.action_type == "respond"
+        and step.action.email_id == "e-002"
+        and step.action.response_template == "acknowledge"
+        for step in trajectory
+    ):
+        score += 0.2
     if any(
         step.action.action_type == "classify"
         and step.action.email_id == "e-003"
         and step.action.category == "normal"
         for step in trajectory
     ):
-        correct += 0.2
+        score += 0.15
     if any(
         step.action.action_type == "respond"
         and step.action.email_id == "e-003"
         and step.action.response_template == "request_info"
         for step in trajectory
     ):
-        correct += 0.1
+        score += 0.15
     if any(
-        step.action.action_type == "ignore" and step.action.email_id == "e-004"
+        (
+            step.action.action_type == "ignore"
+            or (step.action.action_type == "classify" and step.action.category == "spam")
+        )
+        and step.action.email_id == "e-004"
         for step in trajectory
     ):
-        correct += 0.2
-    return max(0.0, min(1.0, correct - penalty))
+        score += 0.05
+    loops = sum(1 for step in trajectory if step.info.get("loop_detected"))
+    score -= min(loops * 0.05, 0.15)
+    return max(0.0, min(1.0, score))
 
 
 def _task_two_grade(trajectory: list[StepRecord]) -> float:
@@ -504,13 +542,17 @@ def _generic_task_grade(trajectory: list[StepRecord]) -> float:
     return max(0.0, min(1.0, completion_ratio * 0.4 + progress_bonus + action_bonus - penalty))
 
 
-def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
-    graders = {
+def get_benchmark_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
+    return {
         "task_easy_classification": _task_one_grade,
         "task_medium_prioritization": _task_two_grade,
         "task_hard_thread_reasoning": _task_three_grade,
     }
-    for task in get_email_tasks():
+
+
+def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
+    graders = dict(get_benchmark_graders())
+    for task in get_email_tasks(include_supplemental=True):
         if task.name in graders:
             continue
         if task.name.startswith("task_easy_classification"):
