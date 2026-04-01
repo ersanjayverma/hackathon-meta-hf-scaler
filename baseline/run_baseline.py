@@ -21,6 +21,7 @@ from openenv.runtime_config import (
     runtime_api_base_url,
     runtime_api_key,
     runtime_baseline_backend,
+    runtime_has_openai_config,
     runtime_model_name,
 )
 from openenv.tasks import (
@@ -306,7 +307,10 @@ def _reset_runtime_stats() -> None:
 
 
 def _resolve_backend(backend: str | None) -> str:
-    requested = (backend or runtime_baseline_backend(CANONICAL_BASELINE_BACKEND) or CANONICAL_BASELINE_BACKEND).strip().lower()
+    requested = backend or runtime_baseline_backend()
+    if requested is None:
+        return "openai" if runtime_has_openai_config(api_base_url_default=API_BASE_URL, model_name_default=MODEL_NAME) else CANONICAL_BASELINE_BACKEND
+    requested = requested.strip().lower()
     if requested not in OPTIONAL_BASELINE_BACKENDS:
         return CANONICAL_BASELINE_BACKEND
     return requested

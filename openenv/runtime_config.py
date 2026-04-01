@@ -47,6 +47,18 @@ def runtime_api_key() -> str | None:
     return runtime_hf_token() or runtime_openai_api_key()
 
 
+def runtime_has_openai_config(
+    *,
+    api_base_url_default: str | None = None,
+    model_name_default: str | None = None,
+) -> bool:
+    return bool(
+        runtime_api_base_url(api_base_url_default)
+        and runtime_model_name(model_name_default)
+        and runtime_api_key()
+    )
+
+
 def runtime_baseline_backend(default: str | None = None) -> str | None:
     return os.getenv(ENV_OPENENV_BASELINE_BACKEND) or default
 

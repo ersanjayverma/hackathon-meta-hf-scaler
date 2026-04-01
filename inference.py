@@ -22,6 +22,7 @@ from openenv.runtime_config import (
     runtime_api_base_url,
     runtime_baseline_backend,
     runtime_benchmark_name,
+    runtime_has_openai_config,
     runtime_hf_token,
     runtime_model_name,
     runtime_task_name,
@@ -50,7 +51,7 @@ def _resolve_backend() -> str:
     explicit_backend = runtime_baseline_backend()
     if explicit_backend:
         return explicit_backend.strip().lower()
-    if runtime_api_base_url(API_BASE_URL) and runtime_model_name(MODEL_NAME) and runtime_hf_token():
+    if runtime_has_openai_config(api_base_url_default=API_BASE_URL, model_name_default=MODEL_NAME):
         return "openai"
     return "heuristic"
 
