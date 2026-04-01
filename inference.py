@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Iterable
 
 from openai import OpenAI
 
@@ -31,11 +30,12 @@ def _canonical_tasks_by_name():
     return {task.name: task for task in get_benchmark_tasks()}
 
 
-def _select_task_name() -> str:
+def _select_tasks():
     requested_task = os.environ.get("OPENENV_TASK")
-    if requested_task and requested_task in _canonical_tasks_by_name():
-        return requested_task
-    return get_benchmark_task_names()[0]
+    tasks_by_name = _canonical_tasks_by_name()
+    if requested_task and requested_task in tasks_by_name:
+        return [tasks_by_name[requested_task]]
+    return [tasks_by_name[name] for name in get_benchmark_task_names()]
 
 
 def _resolve_model_name(backend: str) -> str:
@@ -84,18 +84,14 @@ def _infer_category(agent: HeuristicAgent, email) -> str:
     return agent._profile(email).category
 
 
-def _sorted_unprocessed_emails(observation: Observation, processed_email_ids: set[str]) -> list:
-    unique_visible = {}
+def _visible_unprocessed_emails(observation: Observation, processed_email_ids: set[str]) -> list:
+    visible = {}
     for email in observation.inbox:
         if email.email_id not in processed_email_ids:
-            unique_visible[email.email_id] = email
+            visible[email.email_id] = email
     return sorted(
-        unique_visible.values(),
-        key=lambda email: (
-            -_priority_rank(email.priority_hint),
-            -email.age,
-            email.email_id,
-        ),
+        visible.values(),
+        key=lambda email: (-_priority_rank(email.priority_hint), -email.age, email.email_id),
     )
 
 
@@ -112,8 +108,9 @@ def _next_classification_action(
     processed_email_ids: set[str],
     backend: str,
     heuristic_agent: HeuristicAgent,
-):
-    candidates = _sorted_unprocessed_emails(observation, processed_email_ids)
+    llm_classifier,
+) -> Action | None:
+    candidates = _visible_unprocessed_emails(observation, processed_email_ids)
     if not candidates:
         return None
 
@@ -127,7 +124,7 @@ def _next_classification_action(
     if backend != "openai":
         return fallback_action
 
-    suggested_action = _build_openai_classifier(_resolve_model_name(backend))(observation)
+    suggested_action = llm_classifier(observation)
     if (
         suggested_action.action_type == "classify"
         and suggested_action.email_id is not None
@@ -142,17 +139,12 @@ def _task_email_ids(task) -> set[str]:
     return {str(email["email_id"]) for email in task.initial_state.get("emails", [])}
 
 
-def main() -> None:
-    backend = _resolve_backend()
-    task_name = _select_task_name()
-    task = _canonical_tasks_by_name()[task_name]
-    model_name = _resolve_model_name(backend)
+def _run_task(task, backend: str, model_name: str, heuristic_agent: HeuristicAgent, llm_classifier) -> None:
     env = EmailTriageEnv(task=task, seed=task.seed)
     env_logger = getattr(getattr(env, "logger", None), "_logger", None)
     if env_logger is not None:
         env_logger.setLevel(logging.CRITICAL + 1)
 
-    heuristic_agent = HeuristicAgent()
     all_email_ids = _task_email_ids(task)
     processed_email_ids: set[str] = set()
     rewards: list[float] = []
@@ -174,18 +166,26 @@ def main() -> None:
                 processed_email_ids=processed_email_ids,
                 backend=backend,
                 heuristic_agent=heuristic_agent,
+                llm_classifier=llm_classifier,
             )
-            if action is None:
-                break
 
-            if action.email_id is None or action.email_id in processed_email_ids:
+            if action is None:
+                unseen_remaining = all_email_ids - processed_email_ids
+                visible_ids = {email.email_id for email in observation.inbox}
+                if unseen_remaining and not (unseen_remaining & visible_ids):
+                    action = Action(action_type="wait")
+                else:
+                    break
+
+            if action.email_id is not None and action.email_id in processed_email_ids:
                 break
 
             observation, reward, done, info = env.step(action)
             reward_value = float(reward.total)
             rewards.append(reward_value)
             steps_taken += 1
-            processed_email_ids.add(action.email_id)
+            if action.action_type == "classify" and action.email_id is not None:
+                processed_email_ids.add(action.email_id)
             error = info.get("last_action_error")
             _log_step(steps_taken, action, reward_value, done, error if isinstance(error, str) else None)
 
@@ -196,6 +196,22 @@ def main() -> None:
     finally:
         env.close()
         _log_end(success=success, steps=steps_taken, rewards=rewards)
+
+
+def main() -> None:
+    backend = _resolve_backend()
+    model_name = _resolve_model_name(backend)
+    heuristic_agent = HeuristicAgent()
+    llm_classifier = _build_openai_classifier(model_name) if backend == "openai" else None
+
+    for task in _select_tasks():
+        _run_task(
+            task=task,
+            backend=backend,
+            model_name=model_name,
+            heuristic_agent=heuristic_agent,
+            llm_classifier=llm_classifier,
+        )
 
 
 if __name__ == "__main__":
