@@ -164,7 +164,12 @@ The **canonical baseline** is the deterministic heuristic agent in [agents/heuri
 
 Important:
 
-- default baseline backend: `heuristic`
+- explicit `OPENENV_BASELINE_BACKEND` wins if set
+- otherwise, complete external env config selects `openai`
+  - `API_BASE_URL`
+  - `MODEL_NAME`
+  - `HF_TOKEN`
+- if that env config is incomplete, the runner falls back to internal deterministic `heuristic`
 - optional non-canonical backend: `openai`
 - fixed seeds
 - stable task ordering
@@ -228,7 +233,11 @@ export HF_TOKEN="..."
 python inference.py
 ```
 
-By default, `inference.py` uses the deterministic heuristic baseline.
+Default `inference.py` backend selection:
+
+1. `OPENENV_BASELINE_BACKEND` if explicitly set
+2. `openai` if `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` are all present
+3. otherwise internal deterministic `heuristic`
 
 ## Validation and tests
 
