@@ -208,6 +208,60 @@ Endpoints:
 - `POST /baseline` -> canonical baseline results
 - `POST /grader` -> bounded score for a trajectory
 
+## Simple trainer and grader
+
+This repository now keeps the training and grading surface intentionally small:
+
+- one simple LLM trainer path
+- one simple deterministic grader
+
+### Simple LLM trainer
+
+Export benchmark rollouts as chat-style JSONL:
+
+```bash
+python scripts/train_llm.py --output outputs/datasets/email_triage_sft.jsonl --episodes-per-task 4
+```
+
+Each row includes:
+
+- `messages`: `system`, `user`, `assistant`
+- `metadata`: task name, difficulty, seed, step index, reward, and `done`
+
+The assistant target is always a single JSON action. That makes the dataset usable with standard chat fine-tuning pipelines without extra environment-specific tooling.
+
+Implementation:
+
+- [openenv/llm_training.py](openenv/llm_training.py)
+- [scripts/train_llm.py](scripts/train_llm.py)
+
+### Simple grader
+
+The grader is a plain completion ratio over processed email ids for the selected task:
+
+```text
+score = correct_processed_ids / total_expected_ids
+```
+
+Use it from Python:
+
+```python
+from openenv.grader import grade_processed_ids
+
+score = grade_processed_ids(["e-001", "e-002"], ["e-001", "e-002", "e-003"])
+```
+
+Or from the command line:
+
+```bash
+python scripts/grade_task.py --task-name task_easy_classification --processed-id e-001 --processed-id e-002
+```
+
+Implementation:
+
+- [openenv/grader.py](openenv/grader.py)
+- [scripts/grade_task.py](scripts/grade_task.py)
+
 ## Local setup
 
 ```bash
@@ -228,6 +282,23 @@ Submission entrypoint:
 
 ```bash
 python inference.py
+```
+
+Simple LLM trainer:
+
+```bash
+python scripts/train_llm.py --output outputs/datasets/email_triage_sft.jsonl
+```
+
+This writes chat-style JSONL examples generated from deterministic heuristic rollouts. Each row contains:
+
+- `messages`: `system`, `user`, `assistant`
+- `metadata`: task, seed, step, reward, and `done`
+
+Simple grader:
+
+```bash
+python scripts/grade_task.py --task-name task_easy_classification --processed-id e-001
 ```
 
 Optional OpenAI baseline mode:
@@ -330,7 +401,9 @@ Expected runtime behavior:
 ## Repository structure
 
 - [openenv/models.py](openenv/models.py): typed schemas
-- [openenv/tasks.py](openenv/tasks.py): canonical tasks, supplemental tasks, graders
+- [openenv/tasks.py](openenv/tasks.py): canonical tasks and task loader
+- [openenv/grader.py](openenv/grader.py): simple deterministic grader
+- [openenv/llm_training.py](openenv/llm_training.py): simple LLM training data export
 - [environments/email_triage_env.py](environments/email_triage_env.py): core environment
 - [agents/heuristic_agent.py](agents/heuristic_agent.py): deterministic canonical baseline
 - [baseline/run_baseline.py](baseline/run_baseline.py): benchmark runner
@@ -338,6 +411,8 @@ Expected runtime behavior:
 - [server/app.py](server/app.py): canonical FastAPI app
 - [scenarios/](scenarios): supplemental JSON task scenarios
 - [tests/](tests): smoke, benchmark, RL, and contract tests
+- [scripts/train_llm.py](scripts/train_llm.py): simple LLM trainer entrypoint
+- [scripts/grade_task.py](scripts/grade_task.py): simple grader entrypoint
 - [scripts/precheck.sh](scripts/precheck.sh): reviewer preflight
 
 ## Quick submission checklist

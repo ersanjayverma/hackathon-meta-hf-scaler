@@ -5,6 +5,7 @@ from typing import Callable
 
 from pydantic import Field
 
+from .grader import build_task_grader as _build_simple_task_grader, grade_processed_ids
 from .models import EmailSpec, StepRecord, VersionedModel
 
 CANONICAL_BENCHMARK_TASK_NAMES = (
@@ -354,28 +355,12 @@ def get_email_tasks(
 
 
 def grade_task(processed_ids, expected_ids):
-    correct = len(set(processed_ids) & set(expected_ids))
-    total = len(expected_ids)
-    return correct / total if total > 0 else 1.0
-
-
-def _expected_ids_for_task(task: Task) -> list[str]:
-    return [str(email["email_id"]) for email in task.initial_state.get("emails", [])]
-
-
-def _processed_ids_from_trajectory(trajectory: list[StepRecord]) -> list[str]:
-    if not trajectory:
-        return []
-    return list(trajectory[-1].observation.completed_email_ids)
+    return grade_processed_ids(processed_ids, expected_ids)
 
 
 def _build_task_grader(task: Task) -> Callable[[list[StepRecord]], float]:
-    expected_ids = _expected_ids_for_task(task)
-
-    def _grader(trajectory: list[StepRecord]) -> float:
-        return float(grade_task(_processed_ids_from_trajectory(trajectory), expected_ids))
-
-    return _grader
+    expected_ids = [str(email["email_id"]) for email in task.initial_state.get("emails", [])]
+    return _build_simple_task_grader(expected_ids)
 
 
 def get_benchmark_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
