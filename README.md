@@ -33,12 +33,7 @@ The **official scored benchmark** is exactly these three canonical tasks:
 3. `task_hard_thread_reasoning` (`hard`)
    Track an outage thread across multiple arrivals, react to the escalation trigger at the right time, and avoid distraction from lower-value work.
 
-Everything else in the repository is **supplemental**:
-
-- seeded sample variants
-- JSON-loaded scenarios from `scenarios/`
-
-Supplemental scenarios are useful for experimentation, but they are **not** the canonical benchmark set.
+Only these three tasks are used by the benchmark runtime and graders.
 
 ## Why this is a real-world task
 
@@ -156,7 +151,7 @@ Properties:
 - bounded to `0.0–1.0`
 - aligned with the official benchmark tasks only
 
-`/tasks` exposes the canonical benchmark tasks separately from supplemental scenarios.
+`/tasks` exposes the canonical benchmark tasks and schemas.
 
 ## Deterministic baseline
 
@@ -182,6 +177,8 @@ Important:
 - stable task ordering
 - stable JSON output format
 
+`inference.py` is the submission runner. By default it evaluates all three canonical tasks. Set `TASK_NAME` or `OPENENV_TASK` to run a single canonical task.
+
 Expected canonical baseline scores:
 
 - `task_easy_classification`: `1.00`
@@ -201,12 +198,10 @@ Endpoints:
 
 - `GET /` -> health status
 - `GET /health` -> health status
-- `GET /tasks` -> canonical benchmark tasks, supplemental tasks, schemas
+- `GET /tasks` -> canonical benchmark tasks and schemas
 - `POST /reset` -> initial observation
 - `POST /step` -> next observation, reward, done, info
 - `GET /state` -> current environment state
-- `POST /baseline` -> canonical baseline results
-- `POST /grader` -> bounded score for a trajectory
 
 ## Simple trainer and grader
 
@@ -323,20 +318,21 @@ Default `inference.py` backend selection:
 2. `openai` if `API_BASE_URL`, `MODEL_NAME`, and either `HF_TOKEN` or `OPENAI_API_KEY` are present
 3. otherwise internal deterministic `heuristic`
 
-`inference.py` runs one canonical benchmark episode and emits the required submission line protocol:
+`inference.py` emits the required submission line protocol:
 
 ```text
 [START] task=<task_name> env=<benchmark> model=<model_name>
 [STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-[END] success=<true|false> steps=<n> rewards=<r1,r2,...,rn>
+[END] success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...,rn>
 ```
 
 Notes:
 
-- default task: `task_easy_classification`
-- override task with `TASK_NAME=<canonical_task_name>`
+- default behavior: run all three canonical benchmark tasks
+- override task selection with `TASK_NAME=<canonical_task_name>`
 - `OPENENV_TASK=<canonical_task_name>` is still accepted for compatibility
-- `success` is derived from the canonical task grader
+- use `MODEL_NAME`, not `MODEL`, to select the OpenAI model
+- `success` requires all task emails to be processed and the final score to meet `SUCCESS_SCORE_THRESHOLD`
 - the script prints only these line types to stdout
 
 ## Validation and tests
