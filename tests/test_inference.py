@@ -136,3 +136,12 @@ def test_resolve_backend_falls_back_to_internal_when_env_incomplete(monkeypatch)
     monkeypatch.setenv("MODEL_NAME", "test-model")
     monkeypatch.delenv("HF_TOKEN", raising=False)
     assert inference_module._resolve_backend() == "heuristic"
+
+
+def test_score_episode_reflects_penalties() -> None:
+    score = inference_module._score_episode(
+        processed_email_ids={"e-001", "e-002"},
+        all_email_ids={"e-001", "e-002"},
+        rewards=[2.0, 3.0, -4.0, -1.0],
+    )
+    assert score == 0.5

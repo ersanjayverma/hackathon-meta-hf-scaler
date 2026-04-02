@@ -117,6 +117,28 @@ def _resolve_benchmark_name() -> str:
     return configured_benchmark
 
 
+def _completion_ratio(processed_email_ids: set[str], all_email_ids: set[str]) -> float:
+    return len(processed_email_ids) / max(len(all_email_ids), 1)
+
+
+def _reward_quality(rewards: list[float]) -> float:
+    positive_reward = sum(reward for reward in rewards if reward > 0.0)
+    total_magnitude = sum(abs(reward) for reward in rewards)
+    if total_magnitude <= 0.0:
+        return 0.0
+    return positive_reward / total_magnitude
+
+
+def _score_episode(
+    processed_email_ids: set[str],
+    all_email_ids: set[str],
+    rewards: list[float],
+) -> float:
+    completion_ratio = _completion_ratio(processed_email_ids, all_email_ids)
+    reward_quality = _reward_quality(rewards)
+    return min(max(completion_ratio * reward_quality, 0.0), 1.0)
+
+
 def _build_openai_classifier(model_name: str) -> Classifier:
     client = OpenAI(
         base_url=runtime_api_base_url(API_BASE_URL),
@@ -222,8 +244,7 @@ def _run_task(
             if done:
                 break
 
-        score = len(processed_email_ids) / max(len(all_email_ids), 1)
-        score = min(max(score, 0.0), 1.0)
+        score = _score_episode(processed_email_ids, all_email_ids, rewards)
         success = processed_email_ids == all_email_ids and (
             score >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
         )
