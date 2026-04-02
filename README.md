@@ -168,9 +168,16 @@ Important:
 - otherwise, complete external env config selects `openai`
   - `API_BASE_URL`
   - `MODEL_NAME`
-  - `HF_TOKEN`
+  - `HF_TOKEN` or `OPENAI_API_KEY`
 - if that env config is incomplete, the runner falls back to internal deterministic `heuristic`
 - optional non-canonical backend: `openai`
+- additional runtime overrides are supported directly through environment variables
+  - `TASK_NAME` selects the canonical task for `inference.py`
+  - `BENCHMARK` overrides the benchmark name printed in `[START]`
+  - `MAX_STEPS` overrides the step budget
+  - `MAX_TOKENS` overrides OpenAI `max_output_tokens`
+  - `TEMPERATURE` overrides OpenAI `temperature`
+  - `SUCCESS_SCORE_THRESHOLD` overrides the final success threshold
 - fixed seeds
 - stable task ordering
 - stable JSON output format
@@ -230,13 +237,19 @@ export OPENENV_BASELINE_BACKEND=openai
 export API_BASE_URL="..."
 export MODEL_NAME="..."
 export HF_TOKEN="..."
+export TASK_NAME=task_hard_thread_reasoning
+export BENCHMARK=email_triage_benchmark
+export MAX_STEPS=16
+export MAX_TOKENS=256
+export TEMPERATURE=0.2
+export SUCCESS_SCORE_THRESHOLD=0.95
 python inference.py
 ```
 
 Default `inference.py` backend selection:
 
 1. `OPENENV_BASELINE_BACKEND` if explicitly set
-2. `openai` if `API_BASE_URL`, `MODEL_NAME`, and `HF_TOKEN` are all present
+2. `openai` if `API_BASE_URL`, `MODEL_NAME`, and either `HF_TOKEN` or `OPENAI_API_KEY` are present
 3. otherwise internal deterministic `heuristic`
 
 `inference.py` runs one canonical benchmark episode and emits the required submission line protocol:
@@ -250,7 +263,8 @@ Default `inference.py` backend selection:
 Notes:
 
 - default task: `task_easy_classification`
-- override task with `OPENENV_TASK=<canonical_task_name>`
+- override task with `TASK_NAME=<canonical_task_name>`
+- `OPENENV_TASK=<canonical_task_name>` is still accepted for compatibility
 - `success` is derived from the canonical task grader
 - the script prints only these line types to stdout
 

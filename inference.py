@@ -24,7 +24,11 @@ from openenv.runtime_config import (
     runtime_benchmark_name,
     runtime_has_openai_config,
     runtime_hf_token,
+    runtime_max_steps,
+    runtime_max_tokens,
     runtime_model_name,
+    runtime_success_score_threshold,
+    runtime_temperature,
     runtime_task_name,
 )
 from openenv.tasks import Task, get_benchmark_task_names, get_benchmark_tasks
@@ -37,13 +41,13 @@ def _validate_runtime_config() -> None:
         raise ValueError("API_BASE_URL must be configured")
     if not runtime_model_name(MODEL_NAME):
         raise ValueError("MODEL_NAME must be configured")
-    if MAX_STEPS <= 0:
+    if runtime_max_steps(MAX_STEPS) <= 0:
         raise ValueError("MAX_STEPS must be positive")
-    if TEMPERATURE < 0.0:
+    if runtime_temperature(TEMPERATURE) < 0.0:
         raise ValueError("TEMPERATURE must be non-negative")
-    if MAX_TOKENS <= 0:
+    if runtime_max_tokens(MAX_TOKENS) <= 0:
         raise ValueError("MAX_TOKENS must be positive")
-    if not 0.0 <= SUCCESS_SCORE_THRESHOLD <= 1.0:
+    if not 0.0 <= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD) <= 1.0:
         raise ValueError("SUCCESS_SCORE_THRESHOLD must be between 0.0 and 1.0")
 
 
@@ -179,7 +183,7 @@ def _run_task(
     rewards: list[float] = []
     steps_taken = 0
     success = False
-    step_budget = max(int(getattr(task, "max_steps", 0) or 0), MAX_STEPS)
+    step_budget = max(int(getattr(task, "max_steps", 0) or 0), runtime_max_steps(MAX_STEPS))
 
     _log_start(task=task.name, env_name=_resolve_benchmark_name(), model=model_name)
 
@@ -212,7 +216,8 @@ def _run_task(
                 break
 
         success = processed_email_ids == all_email_ids and (
-            len(processed_email_ids) / max(len(all_email_ids), 1) >= SUCCESS_SCORE_THRESHOLD
+            len(processed_email_ids) / max(len(all_email_ids), 1)
+            >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
         )
     finally:
         env.close()

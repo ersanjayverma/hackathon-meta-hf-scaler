@@ -17,12 +17,16 @@ from openenv.runtime_config import (
     API_BASE_URL,
     ENV_OPENAI_API_KEY,
     ENV_OPENENV_BASELINE_BACKEND,
+    MAX_TOKENS,
     MODEL_NAME,
+    TEMPERATURE,
     runtime_api_base_url,
     runtime_api_key,
     runtime_baseline_backend,
     runtime_has_openai_config,
+    runtime_max_tokens,
     runtime_model_name,
+    runtime_temperature,
 )
 from openenv.tasks import (
     get_benchmark_graders,
@@ -256,7 +260,8 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
     try:
         response = client.responses.create(
             model=model,
-            temperature=BENCHMARK_METADATA.deterministic_temperature,
+            temperature=runtime_temperature(TEMPERATURE),
+            max_output_tokens=runtime_max_tokens(MAX_TOKENS),
             input=[
                 {
                     "role": "system",
@@ -293,7 +298,8 @@ def verify_openai_api(client: OpenAI, model: str) -> None:
         response = client.responses.create(
             model=model,
             input="ping",
-            temperature=BENCHMARK_METADATA.deterministic_temperature,
+            temperature=runtime_temperature(TEMPERATURE),
+            max_output_tokens=runtime_max_tokens(MAX_TOKENS),
         )
         logger.info("openai_api_healthcheck_ok output=%s", response.output_text)
     except Exception as exc:

@@ -15,12 +15,18 @@ DEFAULT_LOG_LEVEL = "WARNING"
 DEFAULT_PORT = 7860
 
 ENV_API_BASE_URL = "API_BASE_URL"
+ENV_BENCHMARK = "BENCHMARK"
+ENV_MAX_STEPS = "MAX_STEPS"
+ENV_MAX_TOKENS = "MAX_TOKENS"
 ENV_MODEL_NAME = "MODEL_NAME"
 ENV_OPENAI_MODEL = "OPENAI_MODEL"
 ENV_HF_TOKEN = "HF_TOKEN"
 ENV_OPENAI_API_KEY = "OPENAI_API_KEY"
 ENV_OPENENV_BASELINE_BACKEND = "OPENENV_BASELINE_BACKEND"
 ENV_OPENENV_TASK = "OPENENV_TASK"
+ENV_SUCCESS_SCORE_THRESHOLD = "SUCCESS_SCORE_THRESHOLD"
+ENV_TASK_NAME = "TASK_NAME"
+ENV_TEMPERATURE = "TEMPERATURE"
 ENV_MY_ENV_V4_TASK = "MY_ENV_V4_TASK"
 ENV_MY_ENV_V4_BENCHMARK = "MY_ENV_V4_BENCHMARK"
 ENV_OPENENV_LOG_LEVEL = "OPENENV_LOG_LEVEL"
@@ -64,11 +70,27 @@ def runtime_baseline_backend(default: str | None = None) -> str | None:
 
 
 def runtime_task_name(default: str | None = None) -> str | None:
-    return os.getenv(ENV_OPENENV_TASK) or os.getenv(ENV_MY_ENV_V4_TASK) or default
+    return os.getenv(ENV_OPENENV_TASK) or os.getenv(ENV_TASK_NAME) or os.getenv(ENV_MY_ENV_V4_TASK) or default
 
 
 def runtime_benchmark_name(default: str | None = None) -> str | None:
-    return os.getenv(ENV_MY_ENV_V4_BENCHMARK) or default
+    return os.getenv(ENV_BENCHMARK) or os.getenv(ENV_MY_ENV_V4_BENCHMARK) or default
+
+
+def runtime_max_steps(default: int = MAX_STEPS) -> int:
+    return int(os.getenv(ENV_MAX_STEPS) or default)
+
+
+def runtime_temperature(default: float = TEMPERATURE) -> float:
+    return float(os.getenv(ENV_TEMPERATURE) or default)
+
+
+def runtime_max_tokens(default: int = MAX_TOKENS) -> int:
+    return int(os.getenv(ENV_MAX_TOKENS) or default)
+
+
+def runtime_success_score_threshold(default: float = SUCCESS_SCORE_THRESHOLD) -> float:
+    return float(os.getenv(ENV_SUCCESS_SCORE_THRESHOLD) or default)
 
 
 def runtime_log_level(default: str = DEFAULT_LOG_LEVEL) -> str:
