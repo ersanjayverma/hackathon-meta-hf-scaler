@@ -242,7 +242,7 @@ class HeuristicAgent:
 
     def _history_by_email(self, observation: Observation) -> dict[str, EmailHistory]:
         history: dict[str, EmailHistory] = {}
-        for trace in observation.action_history:
+        for trace in getattr(observation, "action_history", []):
             if trace.email_id is None:
                 continue
             state = history.setdefault(trace.email_id, EmailHistory())

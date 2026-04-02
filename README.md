@@ -55,13 +55,13 @@ That makes this environment useful for evaluating RL agents, tool-using agents, 
 
 This repo implements the required OpenEnv pieces:
 
-- typed Pydantic models in [openenv/models.py](/home/sj/HACKATHON/openenv/models.py)
-- environment API in [environments/email_triage_env.py](/home/sj/HACKATHON/environments/email_triage_env.py)
+- typed Pydantic models in [openenv/models.py](openenv/models.py)
+- environment API in [environments/email_triage_env.py](environments/email_triage_env.py)
   - `reset() -> Observation`
   - `step(Action) -> (Observation, Reward, done, info)`
   - `state() -> dict`
-- valid root manifest in [openenv.yaml](/home/sj/HACKATHON/openenv.yaml)
-- canonical server entrypoint in [server/app.py](/home/sj/HACKATHON/server/app.py)
+- valid root manifest in [openenv.yaml](openenv.yaml)
+- canonical server entrypoint in [server/app.py](server/app.py), re-exported by [app.py](app.py) for the root container entrypoint
 
 ## Observation space
 
@@ -147,7 +147,7 @@ This makes the environment suitable for RL and long-horizon agent evaluation rat
 
 ## Graders
 
-Canonical benchmark graders are defined in [openenv/tasks.py](/home/sj/HACKATHON/openenv/tasks.py).
+Canonical benchmark graders are defined in [openenv/tasks.py](openenv/tasks.py).
 
 Properties:
 
@@ -160,7 +160,7 @@ Properties:
 
 ## Deterministic baseline
 
-The **canonical baseline** is the deterministic heuristic agent in [agents/heuristic_agent.py](/home/sj/HACKATHON/agents/heuristic_agent.py).
+The **canonical baseline** is the deterministic heuristic agent in [agents/heuristic_agent.py](agents/heuristic_agent.py).
 
 Important:
 
@@ -191,11 +191,11 @@ Expected canonical baseline scores:
 
 The baseline writes a stable result file to:
 
-- [baseline/results/baseline_results.json](/home/sj/HACKATHON/baseline/results/baseline_results.json)
+- [baseline/results/baseline_results.json](baseline/results/baseline_results.json)
 
 ## API
 
-The canonical API is served by [server/app.py](/home/sj/HACKATHON/server/app.py) on port `7860`.
+The canonical API is implemented in [server/app.py](server/app.py) and exposed through the root [app.py](app.py) entrypoint on port `7860`.
 
 Endpoints:
 
@@ -296,13 +296,13 @@ docker build .
 
 Root container definition:
 
-- [Dockerfile](/home/sj/HACKATHON/Dockerfile)
+- [Dockerfile](Dockerfile)
 
 Container behavior:
 
 - installs the package
 - exposes port `7860`
-- runs `uvicorn server.app:app --host 0.0.0.0 --port 7860`
+- runs `uvicorn app:app --host 0.0.0.0 --port 7860`
 
 Example:
 
@@ -317,9 +317,9 @@ This repository is configured for a **Docker Space**.
 
 Reviewer-relevant files:
 
-- [README.md](/home/sj/HACKATHON/README.md) front matter
-- [Dockerfile](/home/sj/HACKATHON/Dockerfile)
-- [server/app.py](/home/sj/HACKATHON/server/app.py)
+- [README.md](README.md) front matter
+- [Dockerfile](Dockerfile)
+- [server/app.py](server/app.py)
 
 Expected runtime behavior:
 
@@ -329,16 +329,16 @@ Expected runtime behavior:
 
 ## Repository structure
 
-- [openenv/models.py](/home/sj/HACKATHON/openenv/models.py): typed schemas
-- [openenv/tasks.py](/home/sj/HACKATHON/openenv/tasks.py): canonical tasks, supplemental tasks, graders
-- [environments/email_triage_env.py](/home/sj/HACKATHON/environments/email_triage_env.py): core environment
-- [agents/heuristic_agent.py](/home/sj/HACKATHON/agents/heuristic_agent.py): deterministic canonical baseline
-- [baseline/run_baseline.py](/home/sj/HACKATHON/baseline/run_baseline.py): benchmark runner
-- [env/](/home/sj/HACKATHON/env): trainer-facing RL adapter
-- [server/app.py](/home/sj/HACKATHON/server/app.py): canonical FastAPI app
-- [scenarios/](/home/sj/HACKATHON/scenarios): supplemental JSON task scenarios
-- [tests/](/home/sj/HACKATHON/tests): smoke, benchmark, RL, and contract tests
-- [scripts/precheck.sh](/home/sj/HACKATHON/scripts/precheck.sh): reviewer preflight
+- [openenv/models.py](openenv/models.py): typed schemas
+- [openenv/tasks.py](openenv/tasks.py): canonical tasks, supplemental tasks, graders
+- [environments/email_triage_env.py](environments/email_triage_env.py): core environment
+- [agents/heuristic_agent.py](agents/heuristic_agent.py): deterministic canonical baseline
+- [baseline/run_baseline.py](baseline/run_baseline.py): benchmark runner
+- [env/](env): trainer-facing RL adapter
+- [server/app.py](server/app.py): canonical FastAPI app
+- [scenarios/](scenarios): supplemental JSON task scenarios
+- [tests/](tests): smoke, benchmark, RL, and contract tests
+- [scripts/precheck.sh](scripts/precheck.sh): reviewer preflight
 
 ## Quick submission checklist
 
@@ -354,4 +354,4 @@ Expected runtime behavior:
 - Hugging Face Space entrypoint documented: yes
 - reviewer preflight script: yes
 
-Additional reviewer notes are in [SUBMISSION_CHECKLIST.md](/home/sj/HACKATHON/SUBMISSION_CHECKLIST.md).
+Additional reviewer notes are in [SUBMISSION_CHECKLIST.md](SUBMISSION_CHECKLIST.md).

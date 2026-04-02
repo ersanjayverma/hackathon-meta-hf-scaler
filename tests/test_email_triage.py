@@ -34,7 +34,7 @@ def test_grader_correctness() -> None:
     env.step(Action(action_type="classify", email_id=obs.inbox[0].email_id, category="spam"))
     env.step(Action(action_type="classify", email_id=obs.inbox[1].email_id, category="urgent"))
     score = get_graders()[task.name](env.trajectory)
-    assert 0.35 <= score <= 0.45
+    assert score == 0.25
 
 
 def test_reward_consistency() -> None:

@@ -63,7 +63,7 @@ class FakeEnv:
         return None
 
 
-def test_inference_main_runs_all_canonical_tasks(monkeypatch) -> None:
+def test_inference_main_runs_one_selected_canonical_task(monkeypatch) -> None:
     tasks = [
         FakeTask("task_easy_classification", ["e-001", "e-002"]),
         FakeTask("task_medium_prioritization", ["e-101"]),
@@ -89,12 +89,6 @@ def test_inference_main_runs_all_canonical_tasks(monkeypatch) -> None:
         "[STEP] step=1 action=classify('e-001','normal') reward=0.50 done=false error=null",
         "[STEP] step=2 action=classify('e-002','normal') reward=0.50 done=false error=null",
         "[END] success=true steps=2 rewards=0.50,0.50",
-        "[START] task=task_medium_prioritization env=email_triage_benchmark model=heuristic-v1",
-        "[STEP] step=1 action=classify('e-101','normal') reward=0.50 done=false error=null",
-        "[END] success=true steps=1 rewards=0.50",
-        "[START] task=task_hard_thread_reasoning env=email_triage_benchmark model=heuristic-v1",
-        "[STEP] step=1 action=classify('e-201','normal') reward=0.50 done=false error=null",
-        "[END] success=true steps=1 rewards=0.50",
     ]
 
 

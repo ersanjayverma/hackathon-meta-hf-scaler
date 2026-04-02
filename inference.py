@@ -203,7 +203,7 @@ def _run_task(
             return
 
         done = False
-        while steps_taken < step_budget and (processed_email_ids != all_email_ids or not done):
+        while steps_taken < step_budget and processed_email_ids != all_email_ids and not done:
             action, model_error = _next_action(
                 observation=observation,
                 backend=backend,
