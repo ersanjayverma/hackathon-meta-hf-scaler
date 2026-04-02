@@ -74,6 +74,13 @@ def build_safe_default_payload(observation: Observation) -> dict[str, Any]:
     return {"action_type": "wait"}
 
 
+def _compact_error_message(message: str, *, limit: int = 240) -> str:
+    compact_message = " ".join(message.split())
+    if len(compact_message) <= limit:
+        return compact_message
+    return f"{compact_message[: limit - 3]}..."
+
+
 def extract_json_object(raw_output: str) -> dict[str, Any] | None:
     text = raw_output.strip()
     candidates: list[str] = []
@@ -243,17 +250,17 @@ def normalize_decision_payload(payload: dict[str, Any] | None, observation: Obse
     }
 
 
-def action_from_payload(payload: dict[str, Any], observation: Observation) -> Action:
+def action_from_payload(payload: dict[str, Any], observation: Observation) -> tuple[Action, str | None]:
     try:
-        return Action(**payload)
-    except ValidationError:
+        return Action(**payload), None
+    except ValidationError as exc:
         fallback_payload = build_safe_default_payload(observation)
         RUNTIME_STATS["fallback_actions"] += 1
         logger.error("action_validation_failed payload=%s fallback=%s", payload, fallback_payload)
-        return Action(**fallback_payload)
+        return Action(**fallback_payload), f"model_action_validation_failed: {_compact_error_message(str(exc))}"
 
 
-def choose_action(client: OpenAI, observation: Observation, model: str) -> Action:
+def choose_action_with_diagnostics(client: OpenAI, observation: Observation, model: str) -> tuple[Action, str | None]:
     safe_default = build_safe_default_payload(observation)
     raw_output = ""
     parsed_payload: dict[str, Any] | None = None
@@ -279,18 +286,24 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
         RUNTIME_STATS["api_failures"] += 1
         RUNTIME_STATS["fallback_actions"] += 1
         logger.error("llm_request_failed error=%s fallback=%s", exc, safe_default)
-        return Action(**safe_default)
+        return Action(**safe_default), f"model_request_failed: {_compact_error_message(str(exc))}"
 
     if parsed_payload is None:
         RUNTIME_STATS["fallback_actions"] += 1
         logger.error("llm_response_parse_failed raw_output=%s fallback=%s", raw_output, safe_default)
-        return Action(**safe_default)
+        parse_detail = raw_output if raw_output else "empty response"
+        return Action(**safe_default), f"model_response_parse_failed: {_compact_error_message(parse_detail)}"
 
     normalized_payload = normalize_decision_payload(parsed_payload, observation)
     logger.info("llm_raw_output=%s", raw_output)
     logger.info("llm_parsed_json=%s", parsed_payload)
     logger.info("llm_normalized_decision=%s", normalized_payload)
     return action_from_payload(normalized_payload, observation)
+
+
+def choose_action(client: OpenAI, observation: Observation, model: str) -> Action:
+    action, _ = choose_action_with_diagnostics(client, observation, model)
+    return action
 
 
 def verify_openai_api(client: OpenAI, model: str) -> None:

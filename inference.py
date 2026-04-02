@@ -6,7 +6,7 @@ from typing import Any, Callable
 from openai import OpenAI
 
 from agents.heuristic_agent import HeuristicAgent
-from baseline.run_baseline import choose_action
+from baseline.run_baseline import choose_action_with_diagnostics
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
@@ -33,7 +33,7 @@ from openenv.runtime_config import (
 )
 from openenv.tasks import Task, get_benchmark_task_names, get_benchmark_tasks
 
-Classifier = Callable[[Observation], Action]
+Classifier = Callable[[Observation], tuple[Action, str | None]]
 
 
 def _validate_runtime_config() -> None:
@@ -110,6 +110,13 @@ def _log_end(success: bool, steps: int, rewards: list[float]) -> None:
     )
 
 
+def _merge_error_messages(*messages: str | None) -> str | None:
+    cleaned_messages = [" ".join(message.split()) for message in messages if isinstance(message, str) and message.strip()]
+    if not cleaned_messages:
+        return None
+    return " | ".join(cleaned_messages)
+
+
 def _resolve_benchmark_name() -> str:
     configured_benchmark = runtime_benchmark_name(BENCHMARK)
     if configured_benchmark == BENCHMARK:
@@ -123,8 +130,8 @@ def _build_openai_classifier(model_name: str) -> Classifier:
         api_key=runtime_hf_token(),
     )
 
-    def classify(observation: Observation) -> Action:
-        return choose_action(client, observation, model_name)
+    def classify(observation: Observation) -> tuple[Action, str | None]:
+        return choose_action_with_diagnostics(client, observation, model_name)
 
     return classify
 
@@ -134,19 +141,19 @@ def _next_action(
     backend: str,
     heuristic_agent: HeuristicAgent,
     llm_classifier: Classifier | None,
-) -> Action:
+) -> tuple[Action, str | None]:
     fallback_action = heuristic_agent.act(observation)
 
     if backend != "openai":
-        return fallback_action
+        return fallback_action, None
 
-    suggested_action = llm_classifier(observation)
+    suggested_action, model_error = llm_classifier(observation)
     visible_email_ids = {email.email_id for email in observation.inbox}
     if suggested_action.action_type == "wait":
-        return suggested_action if not visible_email_ids else fallback_action
+        return (suggested_action if not visible_email_ids else fallback_action), model_error
     if suggested_action.email_id is None or suggested_action.email_id not in visible_email_ids:
-        return fallback_action
-    return suggested_action
+        return fallback_action, model_error
+    return suggested_action, model_error
 
 
 def _task_email_ids(task: Task) -> set[str]:
@@ -197,7 +204,7 @@ def _run_task(
 
         done = False
         while steps_taken < step_budget and (processed_email_ids != all_email_ids or not done):
-            action = _next_action(
+            action, model_error = _next_action(
                 observation=observation,
                 backend=backend,
                 heuristic_agent=heuristic_agent,
@@ -208,8 +215,14 @@ def _run_task(
             reward_value = float(reward.total)
             rewards.append(reward_value)
             steps_taken += 1
-            error = info.get("last_action_error")
-            _log_step(steps_taken, action, reward_value, done, error if isinstance(error, str) else None)
+            env_error = info.get("last_action_error")
+            _log_step(
+                steps_taken,
+                action,
+                reward_value,
+                done,
+                _merge_error_messages(model_error, env_error if isinstance(env_error, str) else None),
+            )
             processed_email_ids, observed_all_email_ids = _read_progress(env, task, observation)
             all_email_ids |= observed_all_email_ids
             if done:
