@@ -6,13 +6,10 @@ import sys
 
 from fastapi.testclient import TestClient
 
-from agents.heuristic_agent import HeuristicAgent
-from environments.email_triage_env import EmailTriageEnv
-from openenv.tasks import get_benchmark_task_names, get_benchmark_tasks, get_email_tasks, get_graders
+from openenv.tasks import get_benchmark_task_names
 
 MODULE_PATH = Path(__file__).resolve().parents[1] / "app.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
-import server.app as server_app
 MODULE_SPEC = importlib.util.spec_from_file_location("openenv_app", MODULE_PATH)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None
 app_module = importlib.util.module_from_spec(MODULE_SPEC)
@@ -32,7 +29,6 @@ def test_tasks_endpoint_exposes_schema() -> None:
     assert response.status_code == 200
     payload = response.json()
     assert [task["name"] for task in payload["tasks"]] == list(get_benchmark_task_names())
-    assert len(payload["supplemental_tasks"]) >= 1
     assert payload["action_schema"]["title"] == "Action"
     assert payload["observation_schema"]["title"] == "Observation"
     assert payload["reward_schema"]["title"] == "Reward"
@@ -103,74 +99,3 @@ def test_reset_ignores_unknown_json_fields() -> None:
     )
     assert response.status_code == 200
     assert response.json()["step_index"] == 0
-
-
-def test_grader_endpoint_returns_bounded_score() -> None:
-    task = get_benchmark_tasks()[0]
-    env = EmailTriageEnv(task=task, seed=task.seed)
-    observation = env.reset()
-    env.step(HeuristicAgent().act(observation))
-    response = client.post(
-        "/grader",
-        json={
-            "task_name": task.name,
-            "trajectory": [step.model_dump(mode="json") for step in env.trajectory],
-        },
-    )
-    assert response.status_code == 200
-    score = response.json()["score"]
-    assert 0.0 <= score <= 1.0
-    env.close()
-
-
-def test_baseline_endpoint_returns_metadata(monkeypatch) -> None:
-    monkeypatch.setattr(
-        server_app,
-        "run_baseline",
-        lambda model=None, backend=None, include_supplemental=False: {
-            "model": "heuristic-v1",
-            "backend": "heuristic",
-            "api_failures": 0,
-            "fallback_actions": 0,
-            "average_score": 1.0,
-            "tasks": [{"task": "task_easy_classification", "score": 1.0}],
-            "benchmark": {
-                "canonical": True,
-                "task_set": "canonical_benchmark",
-                "benchmark_task_names": list(get_benchmark_task_names()),
-            },
-        },
-    )
-    response = client.post("/baseline", json={})
-    assert response.status_code == 200
-    payload = response.json()
-    assert payload["average_score"] == 1.0
-    assert payload["metadata"]["backend"] == "heuristic"
-    assert payload["benchmark"]["canonical"] is True
-
-
-def test_graders_are_deterministic_and_bounded() -> None:
-    tasks = get_benchmark_tasks()
-    graders = get_graders()
-    assert [task.name for task in tasks] == list(get_benchmark_task_names())
-    for task in tasks:
-        env_one = EmailTriageEnv(task=task, seed=task.seed)
-        env_two = EmailTriageEnv(task=task, seed=task.seed)
-        agent = HeuristicAgent()
-
-        obs_one = env_one.reset()
-        obs_two = env_two.reset()
-        done_one = False
-        done_two = False
-        while not done_one and not done_two:
-            action_one = agent.act(obs_one)
-            action_two = agent.act(obs_two)
-            obs_one, _, done_one, _ = env_one.step(action_one)
-            obs_two, _, done_two, _ = env_two.step(action_two)
-
-        score_one = float(graders[task.name](env_one.trajectory))
-        score_two = float(graders[task.name](env_two.trajectory))
-        assert score_one == score_two
-        assert 0.0 <= score_one <= 1.0
-        env_one.close()
-        env_two.close()

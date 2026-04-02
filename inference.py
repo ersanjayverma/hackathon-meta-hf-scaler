@@ -20,10 +20,10 @@ from openenv.runtime_config import (
     TASK_NAME,
     TEMPERATURE,
     runtime_api_base_url,
+    runtime_api_key,
     runtime_baseline_backend,
     runtime_benchmark_name,
     runtime_has_openai_config,
-    runtime_hf_token,
     runtime_max_steps,
     runtime_max_tokens,
     runtime_model_name,
@@ -102,19 +102,12 @@ def _log_step(step: int, action: Action, reward: float, done: bool, error: str |
     )
 
 
-def _log_end(success: bool, steps: int, rewards: list[float]) -> None:
+def _log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
     rewards_blob = ",".join(f"{reward:.2f}" for reward in rewards)
     print(
-        f"[END] success={str(success).lower()} steps={steps} rewards={rewards_blob}",
+        f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_blob}",
         flush=True,
     )
-
-
-def _merge_error_messages(*messages: str | None) -> str | None:
-    cleaned_messages = [" ".join(message.split()) for message in messages if isinstance(message, str) and message.strip()]
-    if not cleaned_messages:
-        return None
-    return " | ".join(cleaned_messages)
 
 
 def _resolve_benchmark_name() -> str:
@@ -127,7 +120,7 @@ def _resolve_benchmark_name() -> str:
 def _build_openai_classifier(model_name: str) -> Classifier:
     client = OpenAI(
         base_url=runtime_api_base_url(API_BASE_URL),
-        api_key=runtime_hf_token(),
+        api_key=runtime_api_key(),
     )
 
     def classify(observation: Observation) -> tuple[Action, str | None]:
@@ -189,6 +182,7 @@ def _run_task(
     all_email_ids: set[str] = set()
     rewards: list[float] = []
     steps_taken = 0
+    score = 0.0
     success = False
     step_budget = max(int(getattr(task, "max_steps", 0) or 0), runtime_max_steps(MAX_STEPS))
 
@@ -204,7 +198,7 @@ def _run_task(
 
         done = False
         while steps_taken < step_budget and processed_email_ids != all_email_ids and not done:
-            action, model_error = _next_action(
+            action, _ = _next_action(
                 observation=observation,
                 backend=backend,
                 heuristic_agent=heuristic_agent,
@@ -221,20 +215,21 @@ def _run_task(
                 action,
                 reward_value,
                 done,
-                _merge_error_messages(model_error, env_error if isinstance(env_error, str) else None),
+                env_error if isinstance(env_error, str) else None,
             )
             processed_email_ids, observed_all_email_ids = _read_progress(env, task, observation)
             all_email_ids |= observed_all_email_ids
             if done:
                 break
 
+        score = len(processed_email_ids) / max(len(all_email_ids), 1)
+        score = min(max(score, 0.0), 1.0)
         success = processed_email_ids == all_email_ids and (
-            len(processed_email_ids) / max(len(all_email_ids), 1)
-            >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
+            score >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
         )
     finally:
         env.close()
-        _log_end(success=success, steps=steps_taken, rewards=rewards)
+        _log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
 
 
 def main() -> None:
@@ -244,14 +239,14 @@ def main() -> None:
     heuristic_agent = HeuristicAgent()
     llm_classifier = _build_openai_classifier(model_name) if backend == "openai" else None
 
-    task = _select_tasks()[0]
-    _run_task(
-        task=task,
-        backend=backend,
-        model_name=model_name,
-        heuristic_agent=heuristic_agent,
-        llm_classifier=llm_classifier,
-    )
+    for task in _select_tasks():
+        _run_task(
+            task=task,
+            backend=backend,
+            model_name=model_name,
+            heuristic_agent=heuristic_agent,
+            llm_classifier=llm_classifier,
+        )
 
 
 if __name__ == "__main__":

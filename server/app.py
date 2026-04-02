@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass, field
 from json import JSONDecodeError
 from threading import RLock
@@ -9,27 +8,16 @@ from typing import Any
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, ValidationError
 
-from baseline.run_baseline import run_baseline
 from environments.email_triage_env import EmailTriageEnv
-from openenv.models import Action, Observation, Reward, StepRecord
+from openenv.models import Action, Observation, Reward
 from openenv.runtime_config import DEFAULT_PORT, runtime_port
-from openenv.tasks import (
-    Task,
-    get_benchmark_task_names,
-    get_benchmark_tasks,
-    get_email_tasks,
-    get_graders,
-)
+from openenv.tasks import Task, get_benchmark_task_names, get_benchmark_tasks
 
-request_logger = logging.getLogger("uvicorn.error")
 app = FastAPI(title="OpenEnv Email Triage Benchmark", version="1.0.0")
 BENCHMARK_TASKS = get_benchmark_tasks()
-SUPPLEMENTAL_TASKS = get_email_tasks(include_supplemental=True)[len(BENCHMARK_TASKS) :]
-TASKS = BENCHMARK_TASKS + SUPPLEMENTAL_TASKS
-TASKS_BY_NAME = {task.name: task for task in TASKS}
+TASKS_BY_NAME = {task.name: task for task in BENCHMARK_TASKS}
 
 
 def _json_model(model: BaseModel) -> dict[str, Any]:
@@ -51,21 +39,6 @@ class ResetRequest(BaseModel):
 
     task_name: str | None = None
     seed: int | None = None
-
-
-class BaselineRequest(BaseModel):
-    model_config = ConfigDict(extra="ignore")
-
-    model: str | None = None
-    backend: str | None = None
-    include_supplemental: bool = False
-
-
-class GraderRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    task_name: str
-    trajectory: list[StepRecord]
 
 
 @dataclass(slots=True)
@@ -95,40 +68,13 @@ class EnvironmentSession:
             return self.env
 
     def step(self, action: Action) -> tuple[Observation, Reward, bool, dict[str, Any]]:
-        env = self.ensure_env()
-        return env.step(action)
+        return self.ensure_env().step(action)
 
     def state(self) -> dict[str, Any]:
-        env = self.ensure_env()
-        return env.state()
+        return self.ensure_env().state()
 
 
 session = EnvironmentSession()
-
-
-@app.middleware("http")
-async def log_request_body(request: Request, call_next: Any) -> JSONResponse:
-    body = await request.body()
-    request_logger.info(
-        "request method=%s path=%s content_type=%s body=%r",
-        request.method,
-        request.url.path,
-        request.headers.get("content-type"),
-        body.decode("utf-8", errors="replace"),
-    )
-    request._body = body
-    return await call_next(request)
-
-
-@app.exception_handler(HTTPException)
-async def http_exception_handler(_: Request, exc: HTTPException) -> JSONResponse:
-    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
-
-
-@app.exception_handler(Exception)
-async def unhandled_exception_handler(_: Request, exc: Exception) -> JSONResponse:
-    request_logger.exception("unhandled_api_error")
-    return JSONResponse(status_code=500, content={"detail": str(exc)})
 
 
 @app.get("/")
@@ -146,7 +92,6 @@ def tasks() -> dict[str, Any]:
     return {
         "tasks": [_task_summary(task) for task in BENCHMARK_TASKS],
         "benchmark_task_names": list(get_benchmark_task_names()),
-        "supplemental_tasks": [_task_summary(task) for task in SUPPLEMENTAL_TASKS],
         "action_schema": Action.model_json_schema(),
         "observation_schema": Observation.model_json_schema(),
         "reward_schema": Reward.model_json_schema(),
@@ -190,38 +135,6 @@ def step(action: Action) -> dict[str, Any]:
 @app.get("/state")
 def state() -> dict[str, Any]:
     return session.state()
-
-
-@app.post("/baseline")
-def baseline(payload: BaselineRequest | None = None) -> dict[str, Any]:
-    request = payload or BaselineRequest()
-    results = run_baseline(
-        model=request.model,
-        backend=request.backend,
-        include_supplemental=request.include_supplemental,
-    )
-    return {
-        "tasks": results["tasks"],
-        "average_score": results["average_score"],
-        "benchmark": results["benchmark"],
-        "metadata": {
-            "model": results["model"],
-            "backend": results["backend"],
-            "api_failures": results["api_failures"],
-            "fallback_actions": results["fallback_actions"],
-        },
-    }
-
-
-@app.post("/grader")
-def grader(payload: GraderRequest) -> dict[str, float | str]:
-    graders = get_graders()
-    if payload.task_name not in graders:
-        raise HTTPException(status_code=404, detail=f"unknown task: {payload.task_name}")
-    score = float(graders[payload.task_name](payload.trajectory))
-    if not 0.0 <= score <= 1.0:
-        raise HTTPException(status_code=500, detail=f"grader returned out-of-range score: {score}")
-    return {"task_name": payload.task_name, "score": score}
 
 
 def main() -> None:

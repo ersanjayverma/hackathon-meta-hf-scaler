@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Callable
 
 from pydantic import Field
@@ -285,39 +284,6 @@ def _thread_reasoning_task() -> Task:
         seed=303,
     )
 
-
-def _clone_task_sample(task: Task, sample_index: int, seed: int) -> Task:
-    return task.model_copy(
-        update={
-            "name": f"{task.name}_sample_{sample_index:02d}",
-            "description": f"{task.description} Seeded sample {sample_index:02d}.",
-            "seed": seed,
-        }
-    )
-
-
-def _sampled_task_variants() -> list[Task]:
-    base_tasks = [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
-    variant_plan = [
-        (base_tasks[0], 10, 1000),
-        (base_tasks[1], 10, 2000),
-        (base_tasks[2], 10, 3000),
-    ]
-    samples: list[Task] = []
-    sample_index = 1
-    for task, count, seed_offset in variant_plan:
-        for local_index in range(count):
-            samples.append(
-                _clone_task_sample(
-                    task=task,
-                    sample_index=sample_index,
-                    seed=task.seed + seed_offset + local_index,
-                )
-            )
-            sample_index += 1
-    return samples
-
-
 def get_benchmark_tasks() -> list[Task]:
     return [_classification_task(), _prioritization_task(), _thread_reasoning_task()]
 
@@ -327,31 +293,15 @@ def get_benchmark_task_names() -> tuple[str, ...]:
 
 
 def get_builtin_email_tasks() -> list[Task]:
-    return get_benchmark_tasks() + _sampled_task_variants()
-
-
-def get_supplemental_email_tasks(scenarios_path: str | Path | None = None) -> list[Task]:
-    tasks = list(_sampled_task_variants())
-    if scenarios_path is None:
-        scenarios_path = Path("scenarios")
-    from .task_loader import load_task_scenarios, log_task_load_report
-
-    report = load_task_scenarios(scenarios_path)
-    if report.issues:
-        log_task_load_report(report)
-    tasks.extend(report.loaded_tasks)
-    return tasks
+    return get_benchmark_tasks()
 
 
 def get_email_tasks(
-    scenarios_path: str | Path | None = None,
     *,
     include_supplemental: bool = True,
 ) -> list[Task]:
-    tasks = list(get_benchmark_tasks())
-    if include_supplemental:
-        tasks.extend(get_supplemental_email_tasks(scenarios_path=scenarios_path))
-    return tasks
+    _ = include_supplemental
+    return get_benchmark_tasks()
 
 
 def grade_task(processed_ids, expected_ids):
@@ -368,4 +318,4 @@ def get_benchmark_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
 
 
 def get_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
-    return {task.name: _build_task_grader(task) for task in get_email_tasks(include_supplemental=True)}
+    return get_benchmark_graders()
