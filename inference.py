@@ -146,12 +146,7 @@ def _build_openai_classifier(model_name: str) -> Classifier:
     )
 
     def classify(observation: Observation) -> tuple[Action, str | None]:
-        return choose_action_with_diagnostics(
-            client,
-            observation,
-            model_name,
-            response_format={"type": "json_object"}  # 🔥 CRITICAL FIX
-        )
+        return choose_action_with_diagnostics(client, observation, model_name)
 
     return classify
 
