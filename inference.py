@@ -160,6 +160,33 @@ def _build_openai_classifier(model_name: str) -> Classifier:
     return classify
 
 
+def _filter_observation_for_llm(observation: Observation, env_state: dict[str, Any] | None) -> Observation:
+    """Return observation with inbox filtered to only unclassified emails."""
+    if env_state is None:
+        return observation
+    classified_ids = set(env_state.get("classifications", {}).keys())
+    unclassified_inbox = [e for e in observation.inbox if e.email_id not in classified_ids]
+    if not unclassified_inbox:
+        return observation  # all classified — caller will skip LLM anyway
+    return observation.model_copy(update={"inbox": unclassified_inbox})
+
+
+def _is_redundant_action(action: Action, env_state: dict[str, Any] | None) -> bool:
+    """Check if the action repeats something already done on this email."""
+    if env_state is None or action.email_id is None:
+        return False
+    eid = action.email_id
+    if action.action_type == "classify" and eid in env_state.get("classifications", {}):
+        return True
+    if action.action_type == "respond" and eid in env_state.get("responses", {}):
+        return True
+    if action.action_type == "escalate" and eid in env_state.get("escalations", {}):
+        return True
+    if action.action_type == "ignore" and eid in set(env_state.get("ignored", [])):
+        return True
+    return False
+
+
 def _handled_email_ids(env_state: dict[str, Any] | None) -> set[str]:
     """Return IDs of emails already classified/responded/escalated/ignored — no need to send to LLM again."""
     if env_state is None:
@@ -184,13 +211,20 @@ def _next_action(
     if backend != "openai":
         return fallback_action, None
 
-    # Skip LLM entirely if all visible emails are already handled
+    # Skip LLM entirely if all visible emails are already classified
     visible_email_ids = {email.email_id for email in observation.inbox}
-    handled = _handled_email_ids(env_state)
-    if visible_email_ids and visible_email_ids.issubset(handled):
+    classified_ids = set((env_state or {}).get("classifications", {}).keys())
+    unclassified = visible_email_ids - classified_ids
+    if not unclassified:
         return fallback_action, None
 
-    suggested_action, model_error = llm_classifier(observation)
+    # Only show unclassified emails to the LLM so it can't re-pick classified ones
+    filtered_obs = _filter_observation_for_llm(observation, env_state)
+    suggested_action, model_error = llm_classifier(filtered_obs)
+
+    # If LLM suggests a redundant action (e.g. classify already-classified email), use heuristic
+    if _is_redundant_action(suggested_action, env_state):
+        return fallback_action, model_error
 
     if suggested_action.action_type == "wait":
         return (suggested_action if not visible_email_ids else fallback_action), model_error
