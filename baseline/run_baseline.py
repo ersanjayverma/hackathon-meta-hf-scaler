@@ -266,7 +266,7 @@ def choose_action_with_diagnostics(client: OpenAI, observation: Observation, mod
     parsed_payload: dict[str, Any] | None = None
     try:
         response = client.chat.completions.create(
-            model=model_name,
+            model=model,
             messages=messages,
             temperature=0.0,  # keep deterministic
             max_tokens=runtime_max_tokens(MAX_TOKENS),
