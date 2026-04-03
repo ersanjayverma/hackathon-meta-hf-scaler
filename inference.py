@@ -160,19 +160,38 @@ def _build_openai_classifier(model_name: str) -> Classifier:
     return classify
 
 
+def _handled_email_ids(env_state: dict[str, Any] | None) -> set[str]:
+    """Return IDs of emails already classified/responded/escalated/ignored — no need to send to LLM again."""
+    if env_state is None:
+        return set()
+    handled: set[str] = set()
+    handled.update(env_state.get("classifications", {}).keys())
+    handled.update(env_state.get("responses", {}).keys())
+    handled.update(env_state.get("escalations", {}).keys())
+    handled.update(env_state.get("ignored", []))
+    return handled
+
+
 def _next_action(
     observation: Observation,
     backend: str,
     heuristic_agent: HeuristicAgent,
     llm_classifier: Classifier | None,
+    env_state: dict[str, Any] | None = None,
 ) -> tuple[Action, str | None]:
     fallback_action = heuristic_agent.act(observation)
 
     if backend != "openai":
         return fallback_action, None
 
-    suggested_action, model_error = llm_classifier(observation)
+    # Skip LLM entirely if all visible emails are already handled
     visible_email_ids = {email.email_id for email in observation.inbox}
+    handled = _handled_email_ids(env_state)
+    if visible_email_ids and visible_email_ids.issubset(handled):
+        return fallback_action, None
+
+    suggested_action, model_error = llm_classifier(observation)
+
     if suggested_action.action_type == "wait":
         return (suggested_action if not visible_email_ids else fallback_action), model_error
     if suggested_action.email_id is None or suggested_action.email_id not in visible_email_ids:
@@ -229,11 +248,14 @@ def _run_task(
 
         done = False
         while steps_taken < step_budget and processed_email_ids != all_email_ids and not done:
+            # Use env state to ensure every email gets properly classified
+            env_state = env.state() if callable(getattr(env, "state", None)) else None
             action, _ = _next_action(
                 observation=observation,
                 backend=backend,
                 heuristic_agent=heuristic_agent,
                 llm_classifier=llm_classifier,
+                env_state=env_state,
             )
 
             observation, reward, done, info = env.step(action)
