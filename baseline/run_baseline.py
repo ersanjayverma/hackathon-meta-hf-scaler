@@ -354,16 +354,16 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
 
 def verify_openai_api(client: OpenAI, model: str) -> None:
     try:
-        response = client.responses.create(
+        response = client.chat.completions.create(
             model=model,
-            input="ping",
+            messages=[{"role": "user", "content": "ping"}],
             temperature=runtime_temperature(TEMPERATURE),
-            max_output_tokens=runtime_max_tokens(MAX_TOKENS),
+            max_tokens=runtime_max_tokens(MAX_TOKENS),
         )
-        logger.info("openai_api_healthcheck_ok output=%s", response.output_text)
+        logger.info("openai_api_healthcheck_ok output=%s", response.choices[0].message.content)
     except Exception as exc:
         logger.error("openai_api_healthcheck_failed error=%s", exc)
-        raise RuntimeError(f"OpenAI Responses API health check failed for model {model}") from exc
+        raise RuntimeError(f"OpenAI API health check failed for model {model}") from exc
 
 
 def _reset_runtime_stats() -> None:

@@ -23,7 +23,7 @@ class BenchmarkMetadata:
     benchmark_name: str = "email_triage_benchmark"
     benchmark_version: str = "1.0.0"
     output_schema_version: str = "baseline_results/v2"
-    default_model: str = "gpt-5.2"
+    default_model: str = "Qwen/Qwen2.5-72B-Instruct"
     deterministic_temperature: float = 0.0
     canonical_manifest: str = "openenv.yaml"
     generated_manifest: str = "environments/openenv.yaml"

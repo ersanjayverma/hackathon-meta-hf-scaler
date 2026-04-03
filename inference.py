@@ -31,7 +31,7 @@ from openenv.runtime_config import (
     runtime_temperature,
     runtime_task_name,
 )
-from openenv.tasks import Task, get_benchmark_task_names, get_benchmark_tasks
+from openenv.tasks import Task, get_benchmark_graders, get_benchmark_task_names, get_benchmark_tasks
 
 Classifier = Callable[[Observation], tuple[Action, str | None]]
 
@@ -118,25 +118,14 @@ def _resolve_benchmark_name() -> str:
 
 
 def _completion_ratio(processed_email_ids: set[str], all_email_ids: set[str]) -> float:
-    return len(processed_email_ids) / max(len(all_email_ids), 1)
-
-
-def _reward_quality(rewards: list[float]) -> float:
-    positive_reward = sum(reward for reward in rewards if reward > 0.0)
-    total_magnitude = sum(abs(reward) for reward in rewards)
-    if total_magnitude <= 0.0:
-        return 0.0
-    return positive_reward / total_magnitude
+    return len(processed_email_ids & all_email_ids) / max(len(all_email_ids), 1)
 
 
 def _score_episode(
     processed_email_ids: set[str],
     all_email_ids: set[str],
-    rewards: list[float],
 ) -> float:
-    completion_ratio = _completion_ratio(processed_email_ids, all_email_ids)
-    reward_quality = _reward_quality(rewards)
-    return min(max(completion_ratio * reward_quality, 0.0), 1.0)
+    return _completion_ratio(processed_email_ids, all_email_ids)
 
 
 def _build_openai_classifier(model_name: str) -> Classifier:
@@ -244,10 +233,12 @@ def _run_task(
             if done:
                 break
 
-        score = _score_episode(processed_email_ids, all_email_ids, rewards)
-        success = processed_email_ids == all_email_ids and (
-            score >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
-        )
+        score = _score_episode(processed_email_ids, all_email_ids)
+        # Use the official grader if available for the canonical benchmark score
+        graders = get_benchmark_graders()
+        if task.name in graders:
+            score = graders[task.name](env.trajectory)
+        success = score >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
     finally:
         env.close()
         _log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
