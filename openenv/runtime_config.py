@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 
 API_BASE_URL = "https://router.huggingface.co/v1"
+OPENAI_BASE_URL = "https://api.openai.com/v1"
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
 TASK_NAME = "echo"
 BENCHMARK = "my_env_v4"
