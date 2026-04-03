@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "openenv"
+name = "BhB"
 version = "1.0.0"
 description = "Benchmarkable real-world RL environment framework"
 requires-python = ">=3.11"
@@ -11,6 +11,7 @@ dependencies = [
   "fastapi>=0.111",
   "numpy>=1.26",
   "openai>=1.0.0",
+  "openenv-core>=0.2.0",
   "pydantic>=2.7",
   "prometheus-client>=0.20",
   "PyYAML>=6.0",
