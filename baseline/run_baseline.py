@@ -24,6 +24,7 @@ from openenv.runtime_config import (
     runtime_api_key,
     runtime_baseline_backend,
     runtime_has_openai_config,
+    runtime_hf_token,
     runtime_max_tokens,
     runtime_model_name,
     runtime_temperature,
@@ -98,6 +99,11 @@ logger = logging.getLogger(__name__)
 RUNTIME_STATS = {"api_failures": 0, "fallback_actions": 0}
 CANONICAL_BASELINE_BACKEND = "heuristic"
 OPTIONAL_BASELINE_BACKENDS = {"heuristic", "openai"}
+
+
+def _is_hf_router(base_url: str | None = None) -> bool:
+    url = base_url or runtime_api_base_url(API_BASE_URL) or ""
+    return "huggingface" in url
 
 
 def build_safe_default_payload(observation: Observation) -> dict[str, Any]:
@@ -374,6 +380,12 @@ def _reset_runtime_stats() -> None:
 def _resolve_backend(backend: str | None) -> str:
     requested = backend or runtime_baseline_backend()
     if requested is None:
+        # For HF router, require HF_TOKEN specifically
+        if _is_hf_router():
+            if runtime_hf_token():
+                return "openai"
+            logger.warning("HF_TOKEN not set; falling back to heuristic for HF router")
+            return CANONICAL_BASELINE_BACKEND
         return "openai" if runtime_has_openai_config(api_base_url_default=API_BASE_URL, model_name_default=MODEL_NAME) else CANONICAL_BASELINE_BACKEND
     requested = requested.strip().lower()
     if requested not in OPTIONAL_BASELINE_BACKENDS:
@@ -395,8 +407,15 @@ def run_baseline(
 
     resolved_backend = _resolve_backend(backend)
     requested_model_name = model or runtime_model_name(BENCHMARK_METADATA.default_model) or MODEL_NAME
+    # HF router can't serve OpenAI-proprietary models; use HF-compatible default
+    if _is_hf_router() and "/" not in requested_model_name:
+        requested_model_name = MODEL_NAME
     model_name = requested_model_name if resolved_backend == "openai" else "heuristic-v1"
-    resolved_api_key = api_key if api_key is not None else runtime_api_key()
+    # For HF router, use HF_TOKEN exclusively
+    if _is_hf_router():
+        resolved_api_key = api_key if api_key is not None else runtime_hf_token()
+    else:
+        resolved_api_key = api_key if api_key is not None else runtime_api_key()
     resolved_base_url = base_url if base_url is not None else runtime_api_base_url(API_BASE_URL)
     client: OpenAI | None = None
     if resolved_backend == "openai":

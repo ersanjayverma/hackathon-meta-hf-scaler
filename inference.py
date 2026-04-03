@@ -24,6 +24,7 @@ from openenv.runtime_config import (
     runtime_baseline_backend,
     runtime_benchmark_name,
     runtime_has_openai_config,
+    runtime_hf_token,
     runtime_max_steps,
     runtime_max_tokens,
     runtime_model_name,
@@ -34,6 +35,11 @@ from openenv.runtime_config import (
 from openenv.tasks import Task, get_benchmark_graders, get_benchmark_task_names, get_benchmark_tasks
 
 Classifier = Callable[[Observation], tuple[Action, str | None]]
+
+
+def _is_hf_router(base_url: str | None = None) -> bool:
+    url = base_url or runtime_api_base_url(API_BASE_URL) or ""
+    return "huggingface" in url
 
 
 def _validate_runtime_config() -> None:
@@ -55,6 +61,12 @@ def _resolve_backend() -> str:
     explicit_backend = runtime_baseline_backend()
     if explicit_backend:
         return explicit_backend.strip().lower()
+    # For HF router, require HF_TOKEN specifically (OPENAI_API_KEY won't work)
+    if _is_hf_router():
+        if runtime_hf_token():
+            return "openai"
+        print("[WARN] HF_TOKEN not set; falling back to heuristic backend for HF router", flush=True)
+        return "heuristic"
     if runtime_has_openai_config(api_base_url_default=API_BASE_URL, model_name_default=MODEL_NAME):
         return "openai"
     return "heuristic"
@@ -74,7 +86,11 @@ def _select_tasks() -> list[Task]:
 
 def _resolve_model_name(backend: str) -> str:
     if backend == "openai":
-        return runtime_model_name(MODEL_NAME) or BENCHMARK_METADATA.default_model
+        model = runtime_model_name(MODEL_NAME) or BENCHMARK_METADATA.default_model
+        # HF router can't serve OpenAI-proprietary models (gpt-*); use default HF model
+        if _is_hf_router() and "/" not in model:
+            return MODEL_NAME
+        return model
     return "heuristic-v1"
 
 
@@ -129,9 +145,15 @@ def _score_episode(
 
 
 def _build_openai_classifier(model_name: str) -> Classifier:
+    base_url = runtime_api_base_url(API_BASE_URL)
+    # For HF router, use HF_TOKEN exclusively (not OPENAI_API_KEY)
+    if _is_hf_router(base_url):
+        api_key = runtime_hf_token()
+    else:
+        api_key = runtime_api_key()
     client = OpenAI(
-        base_url=runtime_api_base_url(API_BASE_URL),
-        api_key=runtime_api_key(),
+        base_url=base_url,
+        api_key=api_key,
     )
 
     def classify(observation: Observation) -> tuple[Action, str | None]:
