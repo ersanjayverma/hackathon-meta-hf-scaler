@@ -265,22 +265,14 @@ def choose_action_with_diagnostics(client: OpenAI, observation: Observation, mod
     raw_output = ""
     parsed_payload: dict[str, Any] | None = None
     try:
-        response = client.responses.create(
-            model=model,
-            temperature=runtime_temperature(TEMPERATURE),
-            max_output_tokens=runtime_max_tokens(MAX_TOKENS),
-            input=[
-                {
-                    "role": "system",
-                    "content": BASELINE_SYSTEM_PROMPT,
-                },
-                {
-                    "role": "user",
-                    "content": observation.model_dump_json(indent=2),
-                },
-            ],
+        response = client.chat.completions.create(
+            model=model_name,
+            messages=messages,
+            temperature=0.0,  # keep deterministic
+            max_tokens=runtime_max_tokens(MAX_TOKENS),
+            response_format={"type": "json_object"}  
         )
-        raw_output = response.output_text or ""
+        raw_output = raw_output = response.choices[0].message.content or ""
         parsed_payload = extract_json_object(raw_output)
     except Exception as exc:
         RUNTIME_STATS["api_failures"] += 1
