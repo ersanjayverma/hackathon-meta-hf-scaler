@@ -264,6 +264,28 @@ def choose_action_with_diagnostics(client: OpenAI, observation: Observation, mod
     safe_default = build_safe_default_payload(observation)
     raw_output = ""
     parsed_payload: dict[str, Any] | None = None
+    messages = [
+        {
+            "role": "system",
+            "content": BASELINE_SYSTEM_PROMPT,  # ✅ you already defined this — use it
+        },
+        {
+            "role": "user",
+            "content": json.dumps(
+                {
+                    "step": getattr(observation, "step_index", None),
+                    "inbox": [
+                        {
+                            "email_id": e.email_id,
+                            "subject": getattr(e, "subject", ""),
+                            "body": getattr(e, "body", ""),
+                        }
+                        for e in observation.inbox
+                    ],
+                }
+            )
+        },
+    ]
     try:
         response = client.chat.completions.create(
             model=model,
@@ -272,7 +294,7 @@ def choose_action_with_diagnostics(client: OpenAI, observation: Observation, mod
             max_tokens=runtime_max_tokens(MAX_TOKENS),
             response_format={"type": "json_object"}  
         )
-        raw_output = raw_output = response.choices[0].message.content or ""
+        raw_output = response.choices[0].message.content or ""
         parsed_payload = extract_json_object(raw_output)
     except Exception as exc:
         RUNTIME_STATS["api_failures"] += 1
