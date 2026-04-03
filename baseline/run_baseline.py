@@ -327,12 +327,14 @@ def choose_action_with_diagnostics(client: OpenAI, observation: Observation, mod
         },
     ]
     try:
+        token_limit = runtime_max_tokens(MAX_TOKENS)
+        token_param = {"max_tokens": token_limit} if _is_hf_model(model) else {"max_completion_tokens": token_limit}
         response = client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=0.0,  # keep deterministic
-            max_tokens=runtime_max_tokens(MAX_TOKENS),
-            response_format={"type": "json_object"}  
+            response_format={"type": "json_object"},
+            **token_param,
         )
         raw_output = response.choices[0].message.content or ""
         parsed_payload = extract_json_object(raw_output)
@@ -362,11 +364,13 @@ def choose_action(client: OpenAI, observation: Observation, model: str) -> Actio
 
 def verify_openai_api(client: OpenAI, model: str) -> None:
     try:
+        token_limit = runtime_max_tokens(MAX_TOKENS)
+        token_param = {"max_tokens": token_limit} if _is_hf_model(model) else {"max_completion_tokens": token_limit}
         response = client.chat.completions.create(
             model=model,
             messages=[{"role": "user", "content": "ping"}],
             temperature=runtime_temperature(TEMPERATURE),
-            max_tokens=runtime_max_tokens(MAX_TOKENS),
+            **token_param,
         )
         logger.info("openai_api_healthcheck_ok output=%s", response.choices[0].message.content)
     except Exception as exc:
