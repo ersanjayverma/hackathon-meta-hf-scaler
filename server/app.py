@@ -11,9 +11,9 @@ from fastapi import FastAPI, HTTPException, Request
 from pydantic import BaseModel, ConfigDict, ValidationError
 
 from environments.email_triage_env import EmailTriageEnv
-from openenv.models import Action, Observation, Reward
+from openenv.models import Action, Observation, Reward, StepRecord
 from openenv.runtime_config import DEFAULT_PORT, runtime_port
-from openenv.tasks import Task, get_benchmark_task_names, get_benchmark_tasks
+from openenv.tasks import Task, get_benchmark_graders, get_benchmark_task_names, get_benchmark_tasks
 
 app = FastAPI(title="OpenEnv Email Triage Benchmark", version="1.0.0")
 BENCHMARK_TASKS = get_benchmark_tasks()
@@ -135,6 +135,61 @@ def step(action: Action) -> dict[str, Any]:
 @app.get("/state")
 def state() -> dict[str, Any]:
     return session.state()
+
+
+class BaselineRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    task_name: str | None = None
+
+
+class GraderRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+    task_name: str
+    trajectory: list[dict[str, Any]]
+
+
+@app.post("/baseline")
+def baseline(request: BaselineRequest) -> dict[str, Any]:
+    from baseline.run_baseline import _pick_action
+    from openenv.models import EmailSpec
+
+    tasks = [TASKS_BY_NAME[request.task_name]] if request.task_name and request.task_name in TASKS_BY_NAME else BENCHMARK_TASKS
+    graders = get_benchmark_graders()
+    results = []
+    for task in tasks:
+        specs = {s["email_id"]: EmailSpec(**s) for s in task.initial_state["emails"]}
+        env = EmailTriageEnv(task=task, seed=task.seed)
+        obs = env.reset()
+        classified: set[str] = set()
+        responded: set[str] = set()
+        escalated: set[str] = set()
+        done = False
+        while not done:
+            action = _pick_action(obs, specs, classified, responded, escalated)
+            if action.action_type == "classify":
+                classified.add(action.email_id)
+            elif action.action_type == "respond":
+                responded.add(action.email_id)
+            elif action.action_type == "escalate":
+                escalated.add(action.email_id)
+            elif action.action_type == "ignore":
+                classified.add(action.email_id)
+            obs, _, done, _ = env.step(action)
+        score = graders[task.name](env.trajectory)
+        results.append({"task": task.name, "score": round(score, 3)})
+        env.close()
+    avg = sum(r["score"] for r in results) / max(len(results), 1)
+    return {"results": results, "average": round(avg, 3)}
+
+
+@app.post("/grader")
+def grader(request: GraderRequest) -> dict[str, Any]:
+    if request.task_name not in TASKS_BY_NAME:
+        raise HTTPException(status_code=404, detail=f"unknown task: {request.task_name}")
+    graders = get_benchmark_graders()
+    trajectory = [StepRecord(**step) for step in request.trajectory]
+    score = graders[request.task_name](trajectory)
+    return {"task": request.task_name, "score": round(float(score), 3)}
 
 
 def main() -> None:

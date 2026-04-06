@@ -8,7 +8,7 @@ from fastapi.testclient import TestClient
 
 from openenv.tasks import get_benchmark_task_names
 
-MODULE_PATH = Path(__file__).resolve().parents[1] / "app.py"
+MODULE_PATH = Path(__file__).resolve().parents[1] / "server" / "app.py"
 sys.path.insert(0, str(MODULE_PATH.parent))
 MODULE_SPEC = importlib.util.spec_from_file_location("openenv_app", MODULE_PATH)
 assert MODULE_SPEC is not None and MODULE_SPEC.loader is not None

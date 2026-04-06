@@ -22,6 +22,7 @@ from openenv.runtime_config import (
     TEMPERATURE,
     runtime_api_base_url,
     runtime_api_key,
+    runtime_baseline_backend,
     runtime_benchmark_name,
     runtime_hf_token,
     runtime_max_steps,
@@ -322,6 +323,9 @@ def _call_llm(client: OpenAI, observation: Observation, model: str) -> tuple[Act
 
 
 def _validate_runtime_config() -> None:
+    backend = runtime_baseline_backend()
+    if backend == "heuristic":
+        return
     if not runtime_api_base_url(API_BASE_URL):
         raise ValueError("API_BASE_URL must be configured")
     if not runtime_model_name(MODEL_NAME):

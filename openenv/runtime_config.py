@@ -5,12 +5,12 @@ import os
 API_BASE_URL = "https://router.huggingface.co/v1"
 OPENAI_BASE_URL = "https://api.openai.com/v1"
 MODEL_NAME = "Qwen/Qwen2.5-72B-Instruct"
-TASK_NAME = "echo"
-BENCHMARK = "my_env_v4"
-MAX_STEPS = 8
-TEMPERATURE = 0.7
+TASK_NAME = None
+BENCHMARK = "email_triage_benchmark"
+MAX_STEPS = 38
+TEMPERATURE = 0.0
 MAX_TOKENS = 150
-SUCCESS_SCORE_THRESHOLD = 0.1
+SUCCESS_SCORE_THRESHOLD = 0.8
 
 DEFAULT_LOG_LEVEL = "WARNING"
 DEFAULT_PORT = 7860
@@ -28,8 +28,6 @@ ENV_OPENENV_TASK = "OPENENV_TASK"
 ENV_SUCCESS_SCORE_THRESHOLD = "SUCCESS_SCORE_THRESHOLD"
 ENV_TASK_NAME = "TASK_NAME"
 ENV_TEMPERATURE = "TEMPERATURE"
-ENV_MY_ENV_V4_TASK = "MY_ENV_V4_TASK"
-ENV_MY_ENV_V4_BENCHMARK = "MY_ENV_V4_BENCHMARK"
 ENV_OPENENV_LOG_LEVEL = "OPENENV_LOG_LEVEL"
 ENV_PORT = "PORT"
 
@@ -71,11 +69,11 @@ def runtime_baseline_backend(default: str | None = None) -> str | None:
 
 
 def runtime_task_name(default: str | None = None) -> str | None:
-    return os.getenv(ENV_OPENENV_TASK) or os.getenv(ENV_TASK_NAME) or os.getenv(ENV_MY_ENV_V4_TASK) or default
+    return os.getenv(ENV_OPENENV_TASK) or os.getenv(ENV_TASK_NAME) or default
 
 
 def runtime_benchmark_name(default: str | None = None) -> str | None:
-    return os.getenv(ENV_BENCHMARK) or os.getenv(ENV_MY_ENV_V4_BENCHMARK) or default
+    return os.getenv(ENV_BENCHMARK) or default
 
 
 def runtime_max_steps(default: int = MAX_STEPS) -> int:
