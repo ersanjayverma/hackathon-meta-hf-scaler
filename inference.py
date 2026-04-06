@@ -262,8 +262,9 @@ def _run_task(
     if env_logger is not None:
         env_logger.setLevel(logging.CRITICAL + 1)
 
+    # Only track initial task emails for scoring — ignore spawned follow-ups
+    initial_email_ids = _task_email_ids(task)
     processed_email_ids: set[str] = set()
-    all_email_ids: set[str] = set()
     rewards: list[float] = []
     steps_taken = 0
     score = 0.0
@@ -274,14 +275,18 @@ def _run_task(
 
     try:
         observation = env.reset()
-        processed_email_ids, all_email_ids = _read_progress(env, task, observation)
+        processed_email_ids, _ = _read_progress(env, task, observation)
 
-        if not all_email_ids:
+        if not initial_email_ids:
             success = True
             return
 
         done = False
-        while steps_taken < step_budget and processed_email_ids != all_email_ids and not done:
+        while steps_taken < step_budget and not done:
+            # Check if all initial emails are completed — no need to continue
+            if initial_email_ids.issubset(processed_email_ids):
+                break
+
             # Use env state to ensure every email gets properly classified
             env_state = env.state() if callable(getattr(env, "state", None)) else None
             action, _ = _next_action(
@@ -304,16 +309,16 @@ def _run_task(
                 done,
                 env_error if isinstance(env_error, str) else None,
             )
-            processed_email_ids, observed_all_email_ids = _read_progress(env, task, observation)
-            all_email_ids |= observed_all_email_ids
+            processed_email_ids, _ = _read_progress(env, task, observation)
             if done:
                 break
 
-        score = _score_episode(processed_email_ids, all_email_ids)
-        # Use the official grader if available for the canonical benchmark score
+        # Use the official grader for the canonical benchmark score
         graders = get_benchmark_graders()
         if task.name in graders:
             score = graders[task.name](env.trajectory)
+        else:
+            score = _score_episode(processed_email_ids, initial_email_ids)
         success = score >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
     finally:
         env.close()
