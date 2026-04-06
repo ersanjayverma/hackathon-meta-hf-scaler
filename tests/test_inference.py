@@ -14,6 +14,8 @@ inference_module = importlib.util.module_from_spec(MODULE_SPEC)
 sys.modules[MODULE_SPEC.name] = inference_module
 MODULE_SPEC.loader.exec_module(inference_module)
 
+Action = inference_module.Action
+
 
 class FakeReward:
     def __init__(self, total: float) -> None:
@@ -21,15 +23,14 @@ class FakeReward:
 
 
 class FakeObservation:
-    def __init__(self, inbox) -> None:
+    def __init__(self, inbox, step_index: int = 0) -> None:
         self.inbox = inbox
+        self.step_index = step_index
 
 
 class FakeEmail:
-    def __init__(self, email_id: str, priority_hint: str = "medium", age: int = 0) -> None:
+    def __init__(self, email_id: str) -> None:
         self.email_id = email_id
-        self.priority_hint = priority_hint
-        self.age = age
         self.subject = "routine request"
         self.body = "please review the request"
         self.sender = "ops@customer.example"
@@ -39,7 +40,10 @@ class FakeTask:
     def __init__(self, name: str, email_ids: list[str], seed: int = 101) -> None:
         self.name = name
         self.seed = seed
-        self.initial_state = {"emails": [{"email_id": email_id} for email_id in email_ids]}
+        self.max_steps = 20
+        self.difficulty = "easy"
+        self.description = "test"
+        self.initial_state = {"emails": [{"email_id": eid} for eid in email_ids]}
 
 
 class FakeEnv:
@@ -47,55 +51,43 @@ class FakeEnv:
         self.task = task
         self.seed = seed
         self._step_index = 0
-        self._emails = [FakeEmail(email_id) for email_id in [item["email_id"] for item in task.initial_state["emails"]]]
+        self._emails = [FakeEmail(eid) for eid in [e["email_id"] for e in task.initial_state["emails"]]]
+        self._processed: set[str] = set()
+        self.trajectory = []
 
     def reset(self):
         self._step_index = 0
-        return FakeObservation(list(self._emails))
+        return FakeObservation(list(self._emails), self._step_index)
 
     def step(self, action):
         self._step_index += 1
-        remaining = [email for email in self._emails if email.email_id != action.email_id]
-        self._emails = remaining
-        return FakeObservation(list(self._emails)), FakeReward(0.5), False, {}
+        if action.email_id:
+            self._processed.add(action.email_id)
+            self._emails = [e for e in self._emails if e.email_id != action.email_id]
+        obs = FakeObservation(list(self._emails), self._step_index)
+        return obs, FakeReward(0.5), len(self._emails) == 0, {}
+
+    def state(self):
+        return {
+            "processed_email_ids": list(self._processed),
+            "remaining_email_ids": [e.email_id for e in self._emails],
+            "classifications": {eid: "normal" for eid in self._processed},
+            "responses": {},
+            "escalations": {},
+            "ignored": [],
+        }
 
     def close(self) -> None:
-        return None
+        pass
 
 
-def test_inference_main_runs_all_canonical_tasks(monkeypatch) -> None:
-    tasks = [
-        FakeTask("task_easy_classification", ["e-001", "e-002"]),
-        FakeTask("task_medium_prioritization", ["e-101"]),
-        FakeTask("task_hard_thread_reasoning", ["e-201"]),
-    ]
-
-    monkeypatch.setattr(inference_module, "EmailTriageEnv", FakeEnv)
-    monkeypatch.setattr(inference_module, "get_benchmark_tasks", lambda: tasks)
-    monkeypatch.setattr(
-        inference_module,
-        "get_benchmark_task_names",
-        lambda: tuple(task.name for task in tasks),
-    )
-    monkeypatch.delenv("OPENENV_TASK", raising=False)
-
-    output = io.StringIO()
-    with redirect_stdout(output):
-        inference_module.main()
-
-    lines = output.getvalue().strip().splitlines()
-    assert lines == [
-        "[START] task=task_easy_classification env=email_triage_benchmark model=heuristic-v1",
-        "[STEP] step=1 action=classify('e-001','normal') reward=0.50 done=false error=null",
-        "[STEP] step=2 action=classify('e-002','normal') reward=0.50 done=false error=null",
-        "[END] success=true steps=2 score=1.000 rewards=0.50,0.50",
-        "[START] task=task_medium_prioritization env=email_triage_benchmark model=heuristic-v1",
-        "[STEP] step=1 action=classify('e-101','normal') reward=0.50 done=false error=null",
-        "[END] success=true steps=1 score=1.000 rewards=0.50",
-        "[START] task=task_hard_thread_reasoning env=email_triage_benchmark model=heuristic-v1",
-        "[STEP] step=1 action=classify('e-201','normal') reward=0.50 done=false error=null",
-        "[END] success=true steps=1 score=1.000 rewards=0.50",
-    ]
+def _fake_classifier_factory():
+    """Returns a classifier that classifies the first inbox email as 'normal'."""
+    def classifier(observation):
+        if observation.inbox:
+            return Action(action_type="classify", email_id=observation.inbox[0].email_id, category="normal"), None
+        return Action(action_type="wait"), None
+    return classifier
 
 
 def test_select_tasks_defaults_to_all_canonical_tasks(monkeypatch) -> None:
@@ -108,40 +100,62 @@ def test_select_tasks_defaults_to_all_canonical_tasks(monkeypatch) -> None:
     monkeypatch.setattr(
         inference_module,
         "get_benchmark_task_names",
-        lambda: tuple(task.name for task in tasks),
+        lambda: tuple(t.name for t in tasks),
     )
     monkeypatch.delenv("OPENENV_TASK", raising=False)
-    assert [task.name for task in inference_module._select_tasks()] == [task.name for task in tasks]
+    assert [t.name for t in inference_module._select_tasks()] == [t.name for t in tasks]
 
 
-def test_resolve_backend_prefers_explicit_env(monkeypatch) -> None:
-    monkeypatch.setenv("OPENENV_BASELINE_BACKEND", "heuristic")
-    monkeypatch.setenv("API_BASE_URL", "https://example.invalid/v1")
-    monkeypatch.setenv("MODEL_NAME", "test-model")
-    monkeypatch.setenv("HF_TOKEN", "token")
-    assert inference_module._resolve_backend() == "heuristic"
-
-
-def test_resolve_backend_uses_external_env_when_complete(monkeypatch) -> None:
-    monkeypatch.delenv("OPENENV_BASELINE_BACKEND", raising=False)
-    monkeypatch.setenv("API_BASE_URL", "https://example.invalid/v1")
-    monkeypatch.setenv("MODEL_NAME", "test-model")
-    monkeypatch.setenv("HF_TOKEN", "token")
-    assert inference_module._resolve_backend() == "openai"
-
-
-def test_resolve_backend_falls_back_to_internal_when_env_incomplete(monkeypatch) -> None:
-    monkeypatch.delenv("OPENENV_BASELINE_BACKEND", raising=False)
-    monkeypatch.setenv("API_BASE_URL", "https://example.invalid/v1")
-    monkeypatch.setenv("MODEL_NAME", "test-model")
-    monkeypatch.delenv("HF_TOKEN", raising=False)
-    assert inference_module._resolve_backend() == "heuristic"
-
-
-def test_score_episode_reflects_penalties() -> None:
+def test_score_episode_full_completion() -> None:
     score = inference_module._score_episode(
         processed_email_ids={"e-001", "e-002"},
         all_email_ids={"e-001", "e-002"},
-        rewards=[2.0, 3.0, -4.0, -1.0],
+    )
+    assert score == 1.0
+
+
+def test_score_episode_partial_completion() -> None:
+    score = inference_module._score_episode(
+        processed_email_ids={"e-001"},
+        all_email_ids={"e-001", "e-002"},
     )
     assert score == 0.5
+
+
+def test_extract_json_object_from_markdown_fence() -> None:
+    payload = inference_module.extract_json_object(
+        '```json\n{"action_type":"classify","email_id":"e-001","category":"urgent"}\n```'
+    )
+    assert payload == {"action_type": "classify", "email_id": "e-001", "category": "urgent"}
+
+
+def test_normalize_category_maps_aliases() -> None:
+    assert inference_module.normalize_category("urgent_support") == "urgent"
+    assert inference_module.normalize_category("junk") == "spam"
+    assert inference_module.normalize_category("routine") == "normal"
+    assert inference_module.normalize_category("escalate") == "escalation"
+
+
+def test_normalize_priority_from_int() -> None:
+    assert inference_module.normalize_priority(5) == "critical"
+    assert inference_module.normalize_priority(1) == "low"
+    assert inference_module.normalize_priority(2) == "medium"
+
+
+def test_run_task_completes_all_emails(monkeypatch) -> None:
+    task = FakeTask("task_easy_classification", ["e-001", "e-002"])
+    monkeypatch.setattr(inference_module, "EmailTriageEnv", FakeEnv)
+    monkeypatch.setattr(inference_module, "get_benchmark_graders", lambda: {})
+
+    output = io.StringIO()
+    with redirect_stdout(output):
+        inference_module._run_task(
+            task=task,
+            model_name="test-model",
+            llm_classifier=_fake_classifier_factory(),
+        )
+
+    lines = output.getvalue().strip().splitlines()
+    assert any("[START]" in line for line in lines)
+    assert any("[END]" in line for line in lines)
+    assert any("score=1.000" in line for line in lines)

@@ -6,7 +6,6 @@ from .grader import build_task_grader, grade_processed_ids, processed_ids_from_t
 from .models import Action, Observation, Reward, StepRecord
 from .replay import EpisodeRecorder, EpisodeTransition, ReplayStore
 from .tasks import Task, get_email_tasks, get_graders
-from .vector_env import VectorEnv
 
 __all__ = [
     "Action",
@@ -24,7 +23,6 @@ __all__ = [
     "Reward",
     "StepRecord",
     "Task",
-    "VectorEnv",
     "get_email_tasks",
     "get_graders",
 ]

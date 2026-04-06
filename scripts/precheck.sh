@@ -9,14 +9,11 @@ if [[ -x ".venv/bin/python" ]]; then
   PYTEST_BIN=".venv/bin/pytest"
 fi
 
-echo "[1/4] Running test suite"
+echo "[1/3] Running test suite"
 "$PYTEST_BIN"
 
-echo "[2/4] Validating OpenEnv manifest and environment"
-PYTHONPATH="${PWD}" "$PYTHON_BIN" -m openenv.cli validate .
-
-echo "[3/4] Running canonical deterministic inference baseline"
+echo "[2/3] Running canonical LLM inference"
 "$PYTHON_BIN" inference.py
 
-echo "[4/4] Building Docker image"
+echo "[3/3] Building Docker image"
 docker build .

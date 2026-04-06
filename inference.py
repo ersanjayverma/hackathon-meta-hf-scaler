@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Callable
 
 from openai import OpenAI
+from pydantic import ValidationError
 
-from baseline.run_baseline import choose_action_with_diagnostics
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
 from openenv.models import Action, Observation
@@ -33,12 +34,291 @@ from openenv.runtime_config import (
 )
 from openenv.tasks import Task, get_benchmark_graders, get_benchmark_task_names, get_benchmark_tasks
 
+logger = logging.getLogger(__name__)
+
 Classifier = Callable[[Observation], tuple[Action, str | None]]
 
 
 def _is_hf_model(model: str) -> bool:
     """HF models have org/name format (contain '/'), OpenAI models don't."""
     return "/" in model
+
+
+# ── LLM action parsing & normalization ──────────────────────────────────────
+
+VALID_ACTION_TYPES = {"classify", "respond", "escalate", "ignore", "wait"}
+VALID_PRIORITIES = {"low", "medium", "high", "critical"}
+SAFE_DEFAULT_PRIORITY = "medium"
+
+SYSTEM_PROMPT = """
+You are an email triage agent operating in a time-sensitive environment.
+
+Your objective is to maximize total reward by:
+1. Preventing SLA breaches
+2. Reducing system stress
+3. Correctly classifying emails
+4. Taking timely and effective actions
+
+STRICT RULES (DO NOT VIOLATE):
+1. NEVER choose "wait" if there is any actionable email.
+2. ALWAYS prioritize emails closest to SLA breach.
+3. DO NOT repeat actions on the same email unless new information is received.
+4. EVERY email must be either classified, responded to, escalated, or ignored (only if clearly spam).
+5. If an email is urgent -> respond or escalate immediately.
+6. If unsure -> classify first, then act.
+7. DO NOT stall. Inaction is heavily penalized.
+
+PRIORITIZATION STRATEGY:
+Order emails by:
+1. Imminent SLA deadline
+2. Urgency (urgent > escalation > normal > spam)
+3. Whether already partially handled
+Always pick the highest priority email.
+
+ACTION GUIDELINES:
+- classify: Use when category is unknown.
+- respond: Use when email requires acknowledgment or info.
+- escalate: Use when issue is critical or cannot be handled directly.
+- ignore: ONLY for clear spam.
+- wait: ONLY if backlog == 0
+
+ANTI-FAILURE GUARDS:
+- If stress > 0 -> prioritize clearing backlog immediately
+- If SLA breach risk exists -> override all other logic
+- If same action repeated twice -> choose a different action
+
+Allowed enum values:
+- action_type: classify, respond, escalate, ignore, wait
+- category: spam, urgent, normal, escalation
+- response_template: acknowledge, resolve, request_info, escalate_notice, none
+- priority: low, medium, high, critical
+
+Field rules:
+- wait: all other fields must be null or omitted
+- ignore: email_id is required; category, response_template, and priority must be null or omitted
+- classify: email_id and category are required; response_template and priority must be null or omitted
+- respond: email_id, response_template, and priority are required; category must be null or omitted
+- escalate: email_id and priority are required; category and response_template must be null or omitted
+
+Never invent enum values.
+Never output free text inside enum fields.
+Think step-by-step internally, but ONLY output a single JSON object.
+""".strip()
+
+
+def _build_safe_default_payload(observation: Observation) -> dict[str, Any]:
+    if observation.inbox:
+        return {"action_type": "ignore", "email_id": observation.inbox[0].email_id}
+    return {"action_type": "wait"}
+
+
+def _compact_error_message(message: str, *, limit: int = 240) -> str:
+    compact = " ".join(message.split())
+    return compact if len(compact) <= limit else f"{compact[: limit - 3]}..."
+
+
+def extract_json_object(raw_output: str) -> dict[str, Any] | None:
+    text = raw_output.strip()
+    candidates: list[str] = []
+    if text:
+        candidates.append(text)
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if len(lines) >= 3:
+                candidates.append("\n".join(lines[1:-1]).strip())
+    start = text.find("{")
+    if start != -1:
+        depth = 0
+        in_string = False
+        escaped = False
+        for index in range(start, len(text)):
+            char = text[index]
+            if escaped:
+                escaped = False
+                continue
+            if char == "\\" and in_string:
+                escaped = True
+                continue
+            if char == '"':
+                in_string = not in_string
+                continue
+            if in_string:
+                continue
+            if char == "{":
+                depth += 1
+            elif char == "}":
+                depth -= 1
+                if depth == 0:
+                    candidates.append(text[start : index + 1])
+                    break
+    for candidate in candidates:
+        try:
+            payload = json.loads(candidate)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            return payload
+    return None
+
+
+def normalize_category(value: Any) -> str:
+    if not isinstance(value, str):
+        return "normal"
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "spam": "spam", "junk": "spam", "newsletter": "spam",
+        "urgent": "urgent", "urgent_support": "urgent", "high_priority": "urgent",
+        "normal": "normal", "routine": "normal", "general": "normal",
+        "escalation": "escalation", "escalate": "escalation",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if "spam" in normalized or "newsletter" in normalized:
+        return "spam"
+    if "urgent" in normalized or "critical" in normalized:
+        return "urgent"
+    if "escalat" in normalized:
+        return "escalation"
+    return "normal"
+
+
+def normalize_response_template(value: Any) -> str:
+    if not isinstance(value, str):
+        return "none"
+    normalized = value.strip().lower().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "acknowledge": "acknowledge", "ack": "acknowledge",
+        "resolve": "resolve", "resolution": "resolve",
+        "request_info": "request_info", "request_more_info": "request_info", "ask_for_info": "request_info",
+        "escalate_notice": "escalate_notice", "escalation_notice": "escalate_notice",
+        "none": "none", "no_response": "none",
+    }
+    if normalized in aliases:
+        return aliases[normalized]
+    if "request" in normalized and "info" in normalized:
+        return "request_info"
+    if "escalat" in normalized and "notice" in normalized:
+        return "escalate_notice"
+    if "ack" in normalized:
+        return "acknowledge"
+    if "resolv" in normalized:
+        return "resolve"
+    return "none"
+
+
+def normalize_priority(value: Any) -> str:
+    if isinstance(value, int):
+        return {1: "low", 2: "medium", 3: "medium", 4: "high", 5: "critical"}.get(value, SAFE_DEFAULT_PRIORITY)
+    if not isinstance(value, str):
+        return SAFE_DEFAULT_PRIORITY
+    normalized = value.strip().lower()
+    if normalized in VALID_PRIORITIES:
+        return normalized
+    if normalized.isdigit():
+        return normalize_priority(int(normalized))
+    if "critical" in normalized or "p0" in normalized or "sev0" in normalized or "sev1" in normalized:
+        return "critical"
+    if "high" in normalized or "urgent" in normalized:
+        return "high"
+    if "medium" in normalized or "normal" in normalized:
+        return "medium"
+    if "low" in normalized:
+        return "low"
+    return SAFE_DEFAULT_PRIORITY
+
+
+def normalize_decision_payload(payload: dict[str, Any] | None, observation: Observation) -> dict[str, Any]:
+    safe_default = _build_safe_default_payload(observation)
+    visible_ids = {email.email_id for email in observation.inbox}
+    source = payload or {}
+
+    raw_action_type = source.get("action_type")
+    action_type = raw_action_type if isinstance(raw_action_type, str) else safe_default["action_type"]
+    action_type = action_type.strip().lower() if isinstance(action_type, str) else safe_default["action_type"]
+    if action_type not in VALID_ACTION_TYPES:
+        action_type = safe_default["action_type"]
+
+    raw_email_id = source.get("email_id")
+    email_id = raw_email_id if isinstance(raw_email_id, str) and raw_email_id in visible_ids else safe_default.get("email_id")
+
+    if action_type == "wait":
+        return {"action_type": "wait"}
+    if email_id is None:
+        return safe_default
+    if action_type == "ignore":
+        return {"action_type": "ignore", "email_id": email_id}
+    if action_type == "classify":
+        return {
+            "action_type": "classify",
+            "email_id": email_id,
+            "category": normalize_category(source.get("category")),
+        }
+    if action_type == "escalate":
+        return {
+            "action_type": "escalate",
+            "email_id": email_id,
+            "priority": normalize_priority(source.get("priority")),
+        }
+    response_template = normalize_response_template(source.get("response_template"))
+    if response_template == "none":
+        return safe_default
+    return {
+        "action_type": "respond",
+        "email_id": email_id,
+        "response_template": response_template,
+        "priority": normalize_priority(source.get("priority")),
+    }
+
+
+def _action_from_payload(payload: dict[str, Any], observation: Observation) -> tuple[Action, str | None]:
+    try:
+        return Action(**payload), None
+    except ValidationError as exc:
+        fallback_payload = _build_safe_default_payload(observation)
+        logger.error("action_validation_failed payload=%s fallback=%s", payload, fallback_payload)
+        return Action(**fallback_payload), f"model_action_validation_failed: {_compact_error_message(str(exc))}"
+
+
+def _call_llm(client: OpenAI, observation: Observation, model: str) -> tuple[Action, str | None]:
+    safe_default = _build_safe_default_payload(observation)
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {
+            "role": "user",
+            "content": json.dumps({
+                "step": getattr(observation, "step_index", None),
+                "inbox": [
+                    {"email_id": e.email_id, "subject": getattr(e, "subject", ""), "body": getattr(e, "body", "")}
+                    for e in observation.inbox
+                ],
+            }),
+        },
+    ]
+    try:
+        token_limit = runtime_max_tokens(MAX_TOKENS)
+        token_param = {"max_tokens": token_limit} if _is_hf_model(model) else {"max_completion_tokens": token_limit}
+        response = client.chat.completions.create(
+            model=model,
+            messages=messages,
+            temperature=0.0,
+            response_format={"type": "json_object"},
+            **token_param,
+        )
+        raw_output = response.choices[0].message.content or ""
+        parsed_payload = extract_json_object(raw_output)
+    except Exception as exc:
+        logger.error("llm_request_failed error=%s fallback=%s", exc, safe_default)
+        return Action(**safe_default), f"model_request_failed: {_compact_error_message(str(exc))}"
+
+    if parsed_payload is None:
+        logger.error("llm_response_parse_failed raw_output=%s fallback=%s", raw_output, safe_default)
+        parse_detail = raw_output if raw_output else "empty response"
+        return Action(**safe_default), f"model_response_parse_failed: {_compact_error_message(parse_detail)}"
+
+    normalized_payload = normalize_decision_payload(parsed_payload, observation)
+    return _action_from_payload(normalized_payload, observation)
+
+# ── Runtime config & task selection ─────────────────────────────────────────
 
 
 def _validate_runtime_config() -> None:
@@ -140,7 +420,7 @@ def _build_openai_classifier(model_name: str) -> Classifier:
     )
 
     def classify(observation: Observation) -> tuple[Action, str | None]:
-        return choose_action_with_diagnostics(client, observation, model_name)
+        return _call_llm(client, observation, model_name)
 
     return classify
 

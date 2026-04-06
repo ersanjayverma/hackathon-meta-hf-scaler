@@ -22,12 +22,11 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [project.scripts]
-openenv = "openenv.cli:main"
 server = "server.app:main"
 
 [tool.setuptools]
 include-package-data = true
 
 [tool.setuptools.packages.find]
-include = ["openenv*", "agents*", "environments*", "baseline*", "server*", "env*", "api*"]
+include = ["openenv*", "environments*", "server*"]
 exclude = ["tests*", "configs*"]
