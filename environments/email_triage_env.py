@@ -103,11 +103,13 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 loop_key = (action.action_type, action.email_id or "none")
                 if loop_key == self._last_action_key:
                     self._action_repeat_count += 1
+                    context_multiplier = self._loop_context_multiplier(action)
                     scaled_penalty = EMAIL_TRIAGE_CONFIG.loop_penalty * (
                         1.0 + self._action_repeat_count * EMAIL_TRIAGE_CONFIG.repetition_decay
-                    )
+                    ) * context_multiplier
                     reward_components["loop_penalty"] = max(scaled_penalty, EMAIL_TRIAGE_CONFIG.reward_floor)
                     info["loop_detected"] = True
+                    info["loop_repeat_count"] = self._action_repeat_count
                 else:
                     self._action_repeat_count = 0
                 self._last_action_key = loop_key
@@ -316,7 +318,31 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         }
         if termination_reason is not None:
             info["termination_reason"] = termination_reason
+            info["termination_diagnostics"] = self._termination_diagnostics(termination_reason)
         return info
+
+    def _termination_diagnostics(self, reason: str) -> dict[str, Any]:
+        diag: dict[str, Any] = {"rule": reason}
+        if reason == "system_collapse":
+            diag["stress"] = self._system_state["stress"]
+            diag["threshold"] = EMAIL_TRIAGE_CONFIG.system_collapse_stress
+        elif reason == "cumulative_failure":
+            diag["cumulative_reward"] = self._cumulative_reward
+            diag["threshold"] = EMAIL_TRIAGE_CONFIG.cumulative_reward_floor
+        elif reason == "failure_collapse":
+            window = EMAIL_TRIAGE_CONFIG.failure_collapse_window
+            diag["window"] = window
+            diag["last_n_rewards"] = [s.reward.total for s in self._trajectory[-window:]]
+            diag["condition"] = "all(r < 0.0)"
+        elif reason == "stable_resolution":
+            diag["pending_emails"] = len(self._pending_email_ids())
+            diag["future_arrivals"] = sum(
+                1 for s in self._email_specs.values() if s.arrival_step > self._step_index
+            )
+        elif reason == "max_steps":
+            diag["step_index"] = self._step_index
+            diag["max_steps"] = self.task.max_steps
+        return diag
 
     def _apply_action(self, action: Action, reward_components: dict[str, float]) -> dict[str, Any]:
         info: dict[str, Any] = {}
@@ -327,22 +353,26 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             return info
 
         spec = self._email_specs[action.email_id]
+        urgency_weight = self._urgency_weight(spec)
+        sla_bonus = self._sla_proximity_bonus(spec)
+
         if action.action_type == "classify":
             if self._classifications.get(spec.email_id) is not None:
                 reward_components["redundant_action"] = -0.2
             self._classifications[spec.email_id] = action.category or ""
             if action.category == spec.true_category:
                 reward_components["classification"] = 1.0
+                reward_components["sla_proximity"] = sla_bonus
             elif action.category is not None and self._is_adjacent_category(action.category, spec.true_category):
                 reward_components["classification"] = 0.3
                 resolved_cleanly = False
                 self._register_mistake(spec, "misclassified")
             elif action.category is not None and self._is_harmful_misclass(action.category, spec.true_category):
-                reward_components["classification"] = -1.0
+                reward_components["classification"] = -1.0 * urgency_weight
                 resolved_cleanly = False
                 self._register_mistake(spec, "misclassified")
             else:
-                reward_components["classification"] = -0.5
+                reward_components["classification"] = -0.5 * urgency_weight
                 resolved_cleanly = False
                 self._register_mistake(spec, "misclassified")
         elif action.action_type == "respond":
@@ -352,14 +382,15 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             self._responses[spec.email_id] = action.response_template or "none"
             if action.response_template == spec.response_template:
                 reward_components["response_correctness"] = 1.0
+                reward_components["sla_proximity"] = sla_bonus
             elif action.response_template in ("acknowledge", "request_info"):
                 reward_components["response_correctness"] = 0.3
             else:
-                reward_components["response_correctness"] = -0.5
+                reward_components["response_correctness"] = -0.5 * urgency_weight
                 resolved_cleanly = False
                 self._register_mistake(spec, "wrong_response")
             if self._step_index <= spec.response_deadline:
-                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.15
+                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.15 * urgency_weight
         elif action.action_type == "escalate":
             self._escalations[spec.email_id] = self._step_index
             should_escalate = spec.requires_escalation or (
@@ -367,22 +398,23 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             )
             if should_escalate:
                 reward_components["escalation"] = 1.0
+                reward_components["sla_proximity"] = sla_bonus
             else:
-                reward_components["escalation"] = -1.0
+                reward_components["escalation"] = -1.0 * urgency_weight
                 resolved_cleanly = False
                 self._register_mistake(spec, "premature_escalation")
             if should_escalate and self._step_index <= spec.escalation_deadline:
-                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.2
+                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.2 * urgency_weight
         elif action.action_type == "ignore":
             self._ignored.add(spec.email_id)
             if spec.true_category == "spam":
                 reward_components["ignore"] = 0.3
             elif spec.true_category == "normal":
-                reward_components["ignore"] = -0.5
+                reward_components["ignore"] = -0.5 * urgency_weight
                 resolved_cleanly = False
                 self._register_mistake(spec, "ignored_important")
             else:
-                reward_components["ignore"] = -1.0
+                reward_components["ignore"] = -1.0 * urgency_weight
                 resolved_cleanly = False
                 self._register_mistake(spec, "ignored_important")
 
@@ -392,6 +424,29 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             if resolved_cleanly:
                 reward_components["completion"] = reward_components.get("completion", 0.0) + 0.15
         return info
+
+    def _urgency_weight(self, spec: EmailSpec) -> float:
+        """Priority-based multiplier: urgent/critical errors hurt more."""
+        weights = {"critical": 1.5, "high": 1.3, "medium": 1.0, "low": 0.8}
+        return weights.get(spec.priority_hint, 1.0)
+
+    def _sla_proximity_bonus(self, spec: EmailSpec) -> float:
+        """Bonus for acting on an email close to its SLA deadline.
+
+        Returns 0.0–0.2: higher when closer to deadline (time pressure reward).
+        Returns 0.0 if already past deadline or no deadline.
+        """
+        deadline = spec.classification_deadline
+        if self._step_index > deadline:
+            return 0.0
+        remaining = deadline - self._step_index
+        if remaining <= 0:
+            return 0.2
+        if remaining == 1:
+            return 0.15
+        if remaining == 2:
+            return 0.05
+        return 0.0
 
     def _is_adjacent_category(self, predicted: str, actual: str) -> bool:
         adjacent = {
@@ -405,14 +460,38 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         return (predicted == "spam" and actual in ("urgent", "escalation")) or \
                (predicted == "normal" and actual == "escalation")
 
+    def _loop_context_multiplier(self, action: Action) -> float:
+        """Repeated actions on urgent emails incur harsher penalty."""
+        if action.email_id is None or action.email_id not in self._email_specs:
+            return 1.0
+        spec = self._email_specs[action.email_id]
+        base = self._urgency_weight(spec)
+        # Repeating wait or ignore on a high-priority email is especially bad
+        if action.action_type in ("wait", "ignore") and spec.priority_hint in ("high", "critical"):
+            return base * 1.5
+        return base
+
     def _wait_penalty(self) -> float:
-        urgent_open = [
-            email_id
-            for email_id in self._visible_ids
-            if email_id not in self._completed_ids
-            and self._email_specs[email_id].priority_hint in {"high", "critical"}
-        ]
-        return EMAIL_TRIAGE_CONFIG.urgent_wait_penalty if urgent_open else 0.0
+        """Context-aware wait penalty: scales with urgency and SLA proximity."""
+        penalty = 0.0
+        for email_id in self._visible_ids:
+            if email_id in self._completed_ids:
+                continue
+            spec = self._email_specs[email_id]
+            sla_remaining = spec.classification_deadline - self._step_index
+            if spec.priority_hint in ("high", "critical"):
+                # Base urgent penalty, amplified by SLA proximity
+                base = EMAIL_TRIAGE_CONFIG.urgent_wait_penalty
+                if sla_remaining <= 0:
+                    penalty += base * 2.0  # Already breached — urgent
+                elif sla_remaining <= 1:
+                    penalty += base * 1.5  # About to breach
+                else:
+                    penalty += base
+            elif sla_remaining <= 0:
+                # Non-urgent but past deadline
+                penalty += EMAIL_TRIAGE_CONFIG.urgent_wait_penalty * 0.5
+        return max(penalty, EMAIL_TRIAGE_CONFIG.reward_floor)
 
     def _deadline_penalties(self) -> dict[str, float]:
         penalties: dict[str, float] = {}
@@ -450,18 +529,30 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         return classified and responded and escalated
 
     def _termination_reason(self) -> str | None:
+        # RULE 1: system stress exceeds hard ceiling → immediate halt
         if self._system_state["stress"] > EMAIL_TRIAGE_CONFIG.system_collapse_stress:
             return "system_collapse"
+
+        # RULE 2: cumulative reward below floor → agent is net-destructive
         if self._cumulative_reward < EMAIL_TRIAGE_CONFIG.cumulative_reward_floor:
             return "cumulative_failure"
+
+        # RULE 3: N consecutive negative rewards → agent is in death spiral
+        # Deterministic: exactly failure_collapse_window (3) consecutive r < 0 → done
         window = EMAIL_TRIAGE_CONFIG.failure_collapse_window
         if len(self._trajectory) >= window:
-            if all(s.reward.total < 0.0 for s in self._trajectory[-window:]):
+            last_n = self._trajectory[-window:]
+            if all(s.reward.total < 0.0 for s in last_n):
                 return "failure_collapse"
+
+        # RULE 4: all emails resolved + no future arrivals + no pending events → done
         if EMAIL_TRIAGE_CONFIG.stable_resolution_ends_episode and self._is_stably_resolved():
             return "stable_resolution"
+
+        # RULE 5: hard budget
         if self._step_index >= self.task.max_steps:
             return "max_steps"
+
         return None
 
     def _is_stably_resolved(self) -> bool:
