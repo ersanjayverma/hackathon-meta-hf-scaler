@@ -155,7 +155,7 @@ def test_repeated_sla_breaches_trigger_overload_and_cascade() -> None:
     # early before full overload cascade. Verify that the episode terminated.
     assert done is True
     termination = last_info.get("termination_reason", "")
-    assert termination in ("failure_collapse", "cumulative_failure", "system_collapse", "max_steps")
+    assert termination in ("failure_collapse", "failure_degradation", "cumulative_failure", "system_collapse", "max_steps")
 
 
 def test_episode_stays_alive_after_inbox_is_temporarily_resolved() -> None:

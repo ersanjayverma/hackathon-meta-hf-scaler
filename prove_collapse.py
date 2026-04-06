@@ -27,15 +27,21 @@ def prove_failure_collapse():
 
             # Prove the rule
             window = EMAIL_TRIAGE_CONFIG.failure_collapse_window
-            assert reason in ("failure_collapse", "cumulative_failure"), f"unexpected: {reason}"
+            assert reason in ("failure_collapse", "cumulative_failure", "failure_degradation"), f"unexpected: {reason}"
             if reason == "failure_collapse":
                 assert len(rewards) >= window
                 assert all(r < 0.0 for r in rewards[-window:]), "collapse rule violated"
                 print(f"  VERIFIED: last {window} rewards all < 0.0", file=sys.stderr)
             elif reason == "cumulative_failure":
                 cr = sum(rewards)
-                assert cr < EMAIL_TRIAGE_CONFIG.cumulative_reward_floor
-                print(f"  VERIFIED: cumulative={cr:.3f} < {EMAIL_TRIAGE_CONFIG.cumulative_reward_floor}", file=sys.stderr)
+                assert cr <= EMAIL_TRIAGE_CONFIG.cumulative_reward_floor
+                print(f"  VERIFIED: cumulative={cr:.3f} <= {EMAIL_TRIAGE_CONFIG.cumulative_reward_floor}", file=sys.stderr)
+            elif reason == "failure_degradation":
+                dw = EMAIL_TRIAGE_CONFIG.degradation_window
+                dt = EMAIL_TRIAGE_CONFIG.degradation_threshold
+                neg = sum(1 for r in rewards[-dw:] if r < 0.0)
+                assert neg >= dt
+                print(f"  VERIFIED: {neg}/{dw} negative >= threshold {dt}", file=sys.stderr)
             env.close()
             return True
     env.close()

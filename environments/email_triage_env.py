@@ -334,6 +334,14 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             diag["window"] = window
             diag["last_n_rewards"] = [s.reward.total for s in self._trajectory[-window:]]
             diag["condition"] = "all(r < 0.0)"
+        elif reason == "failure_degradation":
+            deg_window = EMAIL_TRIAGE_CONFIG.degradation_window
+            last_deg = self._trajectory[-deg_window:]
+            diag["window"] = deg_window
+            diag["threshold"] = EMAIL_TRIAGE_CONFIG.degradation_threshold
+            diag["last_n_rewards"] = [s.reward.total for s in last_deg]
+            diag["negative_count"] = sum(1 for s in last_deg if s.reward.total < 0.0)
+            diag["condition"] = f">={EMAIL_TRIAGE_CONFIG.degradation_threshold} of last {deg_window} negative"
         elif reason == "stable_resolution":
             diag["pending_emails"] = len(self._pending_email_ids())
             diag["future_arrivals"] = sum(
@@ -533,8 +541,8 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         if self._system_state["stress"] > EMAIL_TRIAGE_CONFIG.system_collapse_stress:
             return "system_collapse"
 
-        # RULE 2: cumulative reward below floor → agent is net-destructive
-        if self._cumulative_reward < EMAIL_TRIAGE_CONFIG.cumulative_reward_floor:
+        # RULE 2: cumulative reward at or below floor → agent is net-destructive
+        if self._cumulative_reward <= EMAIL_TRIAGE_CONFIG.cumulative_reward_floor:
             return "cumulative_failure"
 
         # RULE 3: N consecutive negative rewards → agent is in death spiral
@@ -545,11 +553,21 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             if all(s.reward.total < 0.0 for s in last_n):
                 return "failure_collapse"
 
-        # RULE 4: all emails resolved + no future arrivals + no pending events → done
+        # RULE 4: degradation — M of last N steps negative → agent is zigzag-failing
+        # Catches agents that produce tiny positive blips between negative runs
+        deg_window = EMAIL_TRIAGE_CONFIG.degradation_window
+        deg_threshold = EMAIL_TRIAGE_CONFIG.degradation_threshold
+        if len(self._trajectory) >= deg_window:
+            last_deg = self._trajectory[-deg_window:]
+            neg_count = sum(1 for s in last_deg if s.reward.total < 0.0)
+            if neg_count >= deg_threshold:
+                return "failure_degradation"
+
+        # RULE 5: all emails resolved + no future arrivals + no pending events → done
         if EMAIL_TRIAGE_CONFIG.stable_resolution_ends_episode and self._is_stably_resolved():
             return "stable_resolution"
 
-        # RULE 5: hard budget
+        # RULE 6: hard budget
         if self._step_index >= self.task.max_steps:
             return "max_steps"
 
