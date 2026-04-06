@@ -138,14 +138,28 @@ Properties:
 - one grader per canonical task
 - deterministic
 - bounded to `0.0–1.0`
-- aligned with the official benchmark tasks only
+- scores **action quality**, not just completion count
+
+Each completed email is scored with a weighted breakdown:
+
+| Component | Weight | Condition |
+|---|---|---|
+| Correct classification | 0.4 | `action.category == spec.true_category` |
+| Correct response template | 0.4 | `action.response_template == spec.response_template` (when `requires_response`) |
+| Correct escalation | 0.2 | escalation performed (when `requires_escalation`) |
+
+The final score is the mean weighted quality across all emails in the task spec.
 
 Use from Python:
 
 ```python
-from openenv.grader import grade_processed_ids
+from openenv.grader import grade_action_quality, grade_processed_ids
 
-score = grade_processed_ids(["e-001", "e-002"], ["e-001", "e-002", "e-003"])
+# Quality-weighted scoring (used by benchmark graders)
+score = grade_action_quality(trajectory, email_specs)
+
+# Simple completion ratio (backward-compatible utility)
+ratio = grade_processed_ids(["e-001", "e-002"], ["e-001", "e-002", "e-003"])
 ```
 
 ## Inference
@@ -254,13 +268,33 @@ python inference.py
 docker build .
 ```
 
+## Heuristic baseline
+
+A deterministic heuristic agent (no LLM, no API key) is included at [baseline/run_baseline.py](baseline/run_baseline.py).
+
+It picks the unfinished email with the lowest deadline at each step and applies the correct action sequence (classify → respond → escalate, or ignore for spam).
+
+```bash
+python baseline/run_baseline.py
+```
+
+Output:
+
+```text
+task=task_easy_classification score=0.800
+task=task_medium_prioritization score=0.840
+task=task_hard_thread_reasoning score=0.920
+average=0.853
+```
+
 ## Docker
 
 Root container definition: [Dockerfile](Dockerfile)
 
 Container behavior:
 
-- installs the package
+- installs pinned dependencies from `requirements.txt` first for stable resolution
+- installs the package with `--no-deps`
 - exposes port `7860`
 - runs `uvicorn server.app:app --host 0.0.0.0 --port 7860`
 
@@ -283,6 +317,7 @@ docker run -p 7860:7860 openenv-email-triage
 - [openenv/runtime_config.py](openenv/runtime_config.py): environment variable config helpers
 - [environments/email_triage_env.py](environments/email_triage_env.py): core email triage environment
 - [server/app.py](server/app.py): canonical FastAPI server
+- [baseline/run_baseline.py](baseline/run_baseline.py): deterministic heuristic baseline (no LLM)
 - [tests/](tests): environment, grader, inference, API, and contract tests
 - [scripts/precheck.sh](scripts/precheck.sh): reviewer preflight script
 

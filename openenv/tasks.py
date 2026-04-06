@@ -4,7 +4,7 @@ from typing import Callable
 
 from pydantic import Field
 
-from .grader import build_task_grader as _build_simple_task_grader, grade_processed_ids
+from .grader import build_task_grader as _build_simple_task_grader, grade_action_quality, grade_processed_ids
 from .models import EmailSpec, StepRecord, VersionedModel
 
 CANONICAL_BENCHMARK_TASK_NAMES = (
@@ -199,7 +199,7 @@ def _thread_reasoning_task() -> Task:
             body="Seeing intermittent timeout spikes in eu-west. Need triage.",
             thread_id="thread-outage",
             arrival_step=0,
-            priority_hint="high",
+            priority_hint="medium",
             noise_score=0.11,
             true_category="urgent",
             response_template="acknowledge",
@@ -216,7 +216,7 @@ def _thread_reasoning_task() -> Task:
             body="Timeout spikes are now global and customer checkouts are failing.",
             thread_id="thread-outage",
             arrival_step=2,
-            priority_hint="critical",
+            priority_hint="medium",
             noise_score=0.04,
             true_category="escalation",
             response_template="escalate_notice",
@@ -309,8 +309,12 @@ def grade_task(processed_ids, expected_ids):
 
 
 def _build_task_grader(task: Task) -> Callable[[list[StepRecord]], float]:
-    expected_ids = [str(email["email_id"]) for email in task.initial_state.get("emails", [])]
-    return _build_simple_task_grader(expected_ids)
+    email_specs = [EmailSpec(**email) for email in task.initial_state.get("emails", [])]
+
+    def grade(trajectory: list[StepRecord]) -> float:
+        return float(grade_action_quality(trajectory, email_specs))
+
+    return grade
 
 
 def get_benchmark_graders() -> dict[str, Callable[[list[StepRecord]], float]]:
