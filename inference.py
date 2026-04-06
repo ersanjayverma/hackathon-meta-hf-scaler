@@ -5,7 +5,6 @@ from typing import Any, Callable
 
 from openai import OpenAI
 
-from agents.heuristic_agent import HeuristicAgent
 from baseline.run_baseline import choose_action_with_diagnostics
 from environments.email_triage_env import EmailTriageEnv
 from openenv.config import BENCHMARK_METADATA
@@ -22,9 +21,7 @@ from openenv.runtime_config import (
     TEMPERATURE,
     runtime_api_base_url,
     runtime_api_key,
-    runtime_baseline_backend,
     runtime_benchmark_name,
-    runtime_has_openai_config,
     runtime_hf_token,
     runtime_max_steps,
     runtime_max_tokens,
@@ -57,18 +54,8 @@ def _validate_runtime_config() -> None:
         raise ValueError("MAX_TOKENS must be positive")
     if not 0.0 <= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD) <= 1.0:
         raise ValueError("SUCCESS_SCORE_THRESHOLD must be between 0.0 and 1.0")
-
-
-def _resolve_backend() -> str:
-    explicit_backend = runtime_baseline_backend()
-    if explicit_backend:
-        return explicit_backend.strip().lower()
-    # Auto-detect: need at least one valid key (HF or OpenAI)
-    if runtime_hf_token() or runtime_openai_api_key():
-        return "openai"
-    if runtime_has_openai_config(api_base_url_default=API_BASE_URL, model_name_default=MODEL_NAME):
-        return "openai"
-    return "heuristic"
+    if not (runtime_hf_token() or runtime_openai_api_key()):
+        raise ValueError("HF_TOKEN or OPENAI_API_KEY must be set for LLM inference")
 
 
 def _canonical_tasks_by_name() -> dict[str, Task]:
@@ -83,10 +70,8 @@ def _select_tasks() -> list[Task]:
     return [tasks_by_name[name] for name in get_benchmark_task_names()]
 
 
-def _resolve_model_name(backend: str) -> str:
-    if backend == "openai":
-        return runtime_model_name(MODEL_NAME) or BENCHMARK_METADATA.default_model
-    return "heuristic-v1"
+def _resolve_model_name() -> str:
+    return runtime_model_name(MODEL_NAME) or BENCHMARK_METADATA.default_model
 
 
 def _format_action(action: Action) -> str:
@@ -201,35 +186,33 @@ def _handled_email_ids(env_state: dict[str, Any] | None) -> set[str]:
 
 def _next_action(
     observation: Observation,
-    backend: str,
-    heuristic_agent: HeuristicAgent,
-    llm_classifier: Classifier | None,
+    llm_classifier: Classifier,
     env_state: dict[str, Any] | None = None,
 ) -> tuple[Action, str | None]:
-    fallback_action = heuristic_agent.act(observation)
+    wait_action = Action(action_type="wait")
+    visible_email_ids = {email.email_id for email in observation.inbox}
 
-    if backend != "openai":
-        return fallback_action, None
+    if not visible_email_ids:
+        return wait_action, None
 
     # Skip LLM entirely if all visible emails are already classified
-    visible_email_ids = {email.email_id for email in observation.inbox}
     classified_ids = set((env_state or {}).get("classifications", {}).keys())
     unclassified = visible_email_ids - classified_ids
     if not unclassified:
-        return fallback_action, None
+        return wait_action, None
 
     # Only show unclassified emails to the LLM so it can't re-pick classified ones
     filtered_obs = _filter_observation_for_llm(observation, env_state)
     suggested_action, model_error = llm_classifier(filtered_obs)
 
-    # If LLM suggests a redundant action (e.g. classify already-classified email), use heuristic
+    # If LLM suggests a redundant action, wait instead of repeating
     if _is_redundant_action(suggested_action, env_state):
-        return fallback_action, model_error
+        return wait_action, model_error
 
     if suggested_action.action_type == "wait":
-        return (suggested_action if not visible_email_ids else fallback_action), model_error
+        return wait_action, model_error
     if suggested_action.email_id is None or suggested_action.email_id not in visible_email_ids:
-        return fallback_action, model_error
+        return wait_action, model_error
     return suggested_action, model_error
 
 
@@ -252,10 +235,8 @@ def _read_progress(env: Any, task: Task, observation: Observation) -> tuple[set[
 
 def _run_task(
     task: Task,
-    backend: str,
     model_name: str,
-    heuristic_agent: HeuristicAgent,
-    llm_classifier: Classifier | None,
+    llm_classifier: Classifier,
 ) -> None:
     env = EmailTriageEnv(task=task, seed=task.seed)
     env_logger = getattr(getattr(env, "logger", None), "_logger", None)
@@ -291,8 +272,6 @@ def _run_task(
             env_state = env.state() if callable(getattr(env, "state", None)) else None
             action, _ = _next_action(
                 observation=observation,
-                backend=backend,
-                heuristic_agent=heuristic_agent,
                 llm_classifier=llm_classifier,
                 env_state=env_state,
             )
@@ -327,17 +306,13 @@ def _run_task(
 
 def main() -> None:
     _validate_runtime_config()
-    backend = _resolve_backend()
-    model_name = _resolve_model_name(backend)
-    heuristic_agent = HeuristicAgent()
-    llm_classifier = _build_openai_classifier(model_name) if backend == "openai" else None
+    model_name = _resolve_model_name()
+    llm_classifier = _build_openai_classifier(model_name)
 
     for task in _select_tasks():
         _run_task(
             task=task,
-            backend=backend,
             model_name=model_name,
-            heuristic_agent=heuristic_agent,
             llm_classifier=llm_classifier,
         )
 
