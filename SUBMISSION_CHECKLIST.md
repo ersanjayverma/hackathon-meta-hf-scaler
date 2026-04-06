@@ -12,7 +12,7 @@ Official scored benchmark tasks:
 
 Source of truth:
 
-- [openenv/tasks.py](/home/sj/HACKATHON/openenv/tasks.py)
+- [openenv/tasks.py](openenv/tasks.py)
 - `get_benchmark_tasks()`
 - `get_benchmark_graders()`
 
@@ -22,12 +22,12 @@ Supplemental scenarios exist, but they are not part of the canonical benchmark s
 
 Required implementation:
 
-- typed models in [openenv/models.py](/home/sj/HACKATHON/openenv/models.py)
-- environment methods in [environments/email_triage_env.py](/home/sj/HACKATHON/environments/email_triage_env.py)
+- typed models in [openenv/models.py](openenv/models.py)
+- environment methods in [environments/email_triage_env.py](environments/email_triage_env.py)
   - `reset()`
   - `step()`
   - `state()`
-- manifest at [openenv.yaml](/home/sj/HACKATHON/openenv.yaml)
+- manifest at [openenv.yaml](openenv.yaml)
 
 Validation command:
 
@@ -40,8 +40,8 @@ Validation command:
 Canonical baseline:
 
 - backend: `heuristic`
-- entrypoint: [inference.py](/home/sj/HACKATHON/inference.py)
-- runner: [baseline/run_baseline.py](/home/sj/HACKATHON/baseline/run_baseline.py)
+- entrypoint: [inference.py](inference.py)
+- runner: [baseline/run_baseline.py](baseline/run_baseline.py)
 
 Expected canonical scores:
 
@@ -52,7 +52,7 @@ Expected canonical scores:
 
 Result file:
 
-- [baseline/results/baseline_results.json](/home/sj/HACKATHON/baseline/results/baseline_results.json)
+- [baseline/results/baseline_results.json](baseline/results/baseline_results.json)
 
 Optional OpenAI comparison mode is available, but it is not the canonical submission baseline.
 
@@ -60,7 +60,7 @@ Optional OpenAI comparison mode is available, but it is not the canonical submis
 
 Canonical app:
 
-- [server/app.py](/home/sj/HACKATHON/server/app.py)
+- [server/app.py](server/app.py)
 
 Important endpoints:
 
@@ -76,7 +76,7 @@ Important endpoints:
 
 Root Dockerfile:
 
-- [Dockerfile](/home/sj/HACKATHON/Dockerfile)
+- [Dockerfile](Dockerfile)
 
 Port:
 
@@ -84,7 +84,7 @@ Port:
 
 Hugging Face Space front matter:
 
-- [README.md](/home/sj/HACKATHON/README.md)
+- [README.md](README.md)
 
 ## One-command reviewer validation
 
