@@ -376,7 +376,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         elif action.action_type == "ignore":
             self._ignored.add(spec.email_id)
             if spec.true_category == "spam":
-                reward_components["ignore"] = 0.5
+                reward_components["ignore"] = 0.3
             elif spec.true_category == "normal":
                 reward_components["ignore"] = -0.5
                 resolved_cleanly = False

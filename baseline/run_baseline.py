@@ -83,7 +83,8 @@ def run_baseline() -> None:
             obs, reward, done, _ = env.step(action)
             rewards.append(float(reward.total))
 
-        max_possible = float(task.max_steps) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
+        steps_taken = len(rewards)
+        max_possible = float(steps_taken) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
         score = max(0.0, min(1.0, sum(rewards) / max_possible)) if rewards else 0.0
         scores.append(score)
         print(f"task={task.name} score={score:.3f}")

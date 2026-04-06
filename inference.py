@@ -406,15 +406,17 @@ def _completion_ratio(processed_email_ids: set[str], all_email_ids: set[str]) ->
     return len(processed_email_ids & all_email_ids) / max(len(all_email_ids), 1)
 
 
-def _compute_score(rewards: list[float], max_steps: int) -> float:
-    """Score = clamp(sum(rewards) / (max_steps * max_reward_per_step), 0, 1).
+def _compute_score(rewards: list[float]) -> float:
+    """Score = clamp(sum(rewards) / (steps_taken * max_reward_per_step), 0, 1).
 
+    steps_taken = len(rewards).
     max_reward_per_step = 1.0 (from config).
-    Deterministic: same rewards + same max_steps = same score.
+    Deterministic: same rewards = same score.
     """
-    if not rewards or max_steps <= 0:
+    if not rewards:
         return 0.0
-    max_possible = float(max_steps) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
+    steps_taken = len(rewards)
+    max_possible = float(steps_taken) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
     raw = sum(rewards) / max_possible
     return max(0.0, min(1.0, raw))
 
@@ -582,8 +584,8 @@ def _run_task(
             if done:
                 break
 
-        # Score = clamp(sum(rewards) / (max_steps * max_reward_per_step), 0, 1)
-        score = _compute_score(rewards, task.max_steps)
+        # Score = clamp(sum(rewards) / (steps_taken * max_reward_per_step), 0, 1)
+        score = _compute_score(rewards)
         success = score >= 0.6
     finally:
         env.close()

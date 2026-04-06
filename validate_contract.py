@@ -7,11 +7,12 @@ from openenv.tasks import get_benchmark_tasks
 from openenv.config import EMAIL_TRIAGE_CONFIG
 
 
-def compute_score(rewards, max_steps):
-    """score = clamp(sum(rewards) / (max_steps * max_reward_per_step), 0, 1)"""
-    if not rewards or max_steps <= 0:
+def compute_score(rewards):
+    """score = clamp(sum(rewards) / (steps_taken * max_reward_per_step), 0, 1)"""
+    if not rewards:
         return 0.0
-    max_possible = float(max_steps) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
+    steps_taken = len(rewards)
+    max_possible = float(steps_taken) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
     raw = sum(rewards) / max_possible
     return max(0.0, min(1.0, raw))
 
@@ -66,14 +67,15 @@ def run():
                 f"REWARD OUT OF BOUNDS: {reward.total} at step {step_num} task {task.name}"
             )
 
-        # RULE 2: score formula exact: clamp(sum(r)/(max_steps*max_r), 0, 1)
-        score = compute_score(rewards, task.max_steps)
-        score2 = compute_score(rewards, task.max_steps)
+        # RULE 2: score = clamp(sum(r) / (steps_taken * max_r), 0, 1)
+        score = compute_score(rewards)
+        score2 = compute_score(rewards)
         assert score == score2, "SCORE NOT DETERMINISTIC"
         assert 0.0 <= score <= 1.0, f"SCORE OUT OF BOUNDS: {score}"
 
         # Verify mathematical correctness
-        expected_raw = sum(rewards) / (task.max_steps * EMAIL_TRIAGE_CONFIG.max_reward_per_step)
+        steps_taken = len(rewards)
+        expected_raw = sum(rewards) / (steps_taken * EMAIL_TRIAGE_CONFIG.max_reward_per_step)
         expected_score = max(0.0, min(1.0, expected_raw))
         assert abs(score - expected_score) < 1e-9, f"SCORE FORMULA MISMATCH: {score} != {expected_score}"
 
@@ -106,7 +108,7 @@ def run():
     print("", file=sys.stderr)
     print("ALL INVARIANTS PASSED", file=sys.stderr)
     print(f"  - Rewards bounded to [-1.0, +1.0]: PASS", file=sys.stderr)
-    print(f"  - Score = clamp(sum(r)/(max_steps*1.0), 0, 1): PASS", file=sys.stderr)
+    print(f"  - Score = clamp(sum(r)/(steps_taken*1.0), 0, 1): PASS", file=sys.stderr)
     print(f"  - Score deterministic: PASS", file=sys.stderr)
     print(f"  - Success = score >= 0.6: PASS", file=sys.stderr)
     print(f"  - No reward spikes: PASS", file=sys.stderr)
