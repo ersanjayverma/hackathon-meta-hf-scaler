@@ -36,7 +36,7 @@ class StructuredLogger:
         self._logger.setLevel(getattr(logging, level_name, logging.WARNING))
         self._logger.propagate = False
         if not self._logger.handlers:
-            stream_handler = logging.StreamHandler(sys.stdout)
+            stream_handler = logging.StreamHandler(sys.stderr)
             stream_handler.setFormatter(JsonFormatter())
             self._logger.addHandler(stream_handler)
         if self.log_path is not None and not any(

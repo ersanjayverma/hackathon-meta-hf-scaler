@@ -6,18 +6,22 @@ from pathlib import Path
 
 @dataclass(frozen=True, slots=True)
 class EmailTriageConfig:
-    loop_penalty: float = -0.1
-    urgent_wait_penalty: float = -0.12
-    missed_classification_penalty: float = -0.1
-    missed_response_penalty: float = -0.15
-    missed_escalation_penalty: float = -0.2
-    stress_penalty_scale: float = 0.02
-    sla_pressure_penalty_scale: float = 0.5
-    system_collapse_stress: float = 100.0
-    system_collapse_penalty: float = -5.0
+    loop_penalty: float = -0.2
+    urgent_wait_penalty: float = -0.15
+    missed_classification_penalty: float = -0.05
+    missed_response_penalty: float = -0.08
+    missed_escalation_penalty: float = -0.1
+    stress_penalty_scale: float = 0.005
+    sla_pressure_penalty_scale: float = 0.05
+    system_collapse_stress: float = 30.0
+    system_collapse_penalty: float = -0.5
     stable_resolution_ends_episode: bool = True
-    reward_floor: float = -5.0
-    reward_ceiling: float = 5.0
+    reward_floor: float = -1.0
+    reward_ceiling: float = 1.0
+    max_reward_per_step: float = 1.0
+    failure_collapse_window: int = 3
+    cumulative_reward_floor: float = -3.0
+    repetition_decay: float = 0.2
 
 
 @dataclass(frozen=True, slots=True)

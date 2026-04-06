@@ -2,12 +2,13 @@ from __future__ import annotations
 
 import json
 import logging
+import sys
 from typing import Any, Callable
 
 from pydantic import ValidationError
 
 from environments.email_triage_env import EmailTriageEnv
-from openenv.config import BENCHMARK_METADATA
+from openenv.config import BENCHMARK_METADATA, EMAIL_TRIAGE_CONFIG
 from openenv.models import Action, Observation
 from openenv.runtime_config import (
     API_BASE_URL,
@@ -35,6 +36,11 @@ from openenv.runtime_config import (
 from openenv.tasks import Task, get_benchmark_graders, get_benchmark_task_names, get_benchmark_tasks
 
 logger = logging.getLogger(__name__)
+if not logger.handlers:
+    _stderr_handler = logging.StreamHandler(sys.stderr)
+    _stderr_handler.setLevel(logging.WARNING)
+    logger.addHandler(_stderr_handler)
+    logger.propagate = False
 
 Classifier = Callable[[Observation], tuple[Action, str | None]]
 
@@ -400,6 +406,19 @@ def _completion_ratio(processed_email_ids: set[str], all_email_ids: set[str]) ->
     return len(processed_email_ids & all_email_ids) / max(len(all_email_ids), 1)
 
 
+def _compute_score(rewards: list[float], max_steps: int) -> float:
+    """Score = clamp(sum(rewards) / (max_steps * max_reward_per_step), 0, 1).
+
+    max_reward_per_step = 1.0 (from config).
+    Deterministic: same rewards + same max_steps = same score.
+    """
+    if not rewards or max_steps <= 0:
+        return 0.0
+    max_possible = float(max_steps) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
+    raw = sum(rewards) / max_possible
+    return max(0.0, min(1.0, raw))
+
+
 def _score_episode(
     processed_email_ids: set[str],
     all_email_ids: set[str],
@@ -514,7 +533,7 @@ def _run_task(
     steps_taken = 0
     score = 0.0
     success = False
-    step_budget = max(int(getattr(task, "max_steps", 0) or 0), runtime_max_steps(MAX_STEPS))
+    step_budget = task.max_steps
 
     _log_start(task=task.name, env_name=_resolve_benchmark_name(), model=model_name)
 
@@ -563,13 +582,9 @@ def _run_task(
             if done:
                 break
 
-        # Use the official grader for the canonical benchmark score
-        graders = get_benchmark_graders()
-        if task.name in graders:
-            score = graders[task.name](env.trajectory)
-        else:
-            score = _score_episode(processed_email_ids, initial_email_ids)
-        success = score >= runtime_success_score_threshold(SUCCESS_SCORE_THRESHOLD)
+        # Score = clamp(sum(rewards) / (max_steps * max_reward_per_step), 0, 1)
+        score = _compute_score(rewards, task.max_steps)
+        success = score >= 0.6
     finally:
         env.close()
         _log_end(success=success, steps=steps_taken, score=score, rewards=rewards)

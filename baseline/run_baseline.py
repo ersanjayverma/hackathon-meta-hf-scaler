@@ -10,6 +10,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from environments.email_triage_env import EmailTriageEnv
+from openenv.config import EMAIL_TRIAGE_CONFIG
 from openenv.models import Action, EmailSpec
 from openenv.tasks import get_benchmark_graders, get_benchmark_tasks
 
@@ -67,6 +68,7 @@ def run_baseline() -> None:
         responded: set[str] = set()
         escalated: set[str] = set()
         done = False
+        rewards: list[float] = []
 
         while not done:
             action = _pick_action(obs, specs, classified, responded, escalated)
@@ -78,9 +80,11 @@ def run_baseline() -> None:
                 escalated.add(action.email_id)
             elif action.action_type == "ignore":
                 classified.add(action.email_id)
-            obs, _, done, _ = env.step(action)
+            obs, reward, done, _ = env.step(action)
+            rewards.append(float(reward.total))
 
-        score = graders[task.name](env.trajectory)
+        max_possible = float(task.max_steps) * EMAIL_TRIAGE_CONFIG.max_reward_per_step
+        score = max(0.0, min(1.0, sum(rewards) / max_possible)) if rewards else 0.0
         scores.append(score)
         print(f"task={task.name} score={score:.3f}")
         env.close()

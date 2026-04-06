@@ -40,7 +40,7 @@ class FakeTask:
     def __init__(self, name: str, email_ids: list[str], seed: int = 101) -> None:
         self.name = name
         self.seed = seed
-        self.max_steps = 20
+        self.max_steps = len(email_ids)
         self.difficulty = "easy"
         self.description = "test"
         self.initial_state = {"emails": [{"email_id": eid} for eid in email_ids]}
@@ -65,7 +65,7 @@ class FakeEnv:
             self._processed.add(action.email_id)
             self._emails = [e for e in self._emails if e.email_id != action.email_id]
         obs = FakeObservation(list(self._emails), self._step_index)
-        return obs, FakeReward(0.5), len(self._emails) == 0, {}
+        return obs, FakeReward(1.0), len(self._emails) == 0, {}
 
     def state(self):
         return {

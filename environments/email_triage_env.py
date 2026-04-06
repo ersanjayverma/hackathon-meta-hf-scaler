@@ -37,6 +37,8 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         self._escalations: dict[str, int] = {}
         self._ignored: set[str] = set()
         self._last_action_key: Optional[tuple[str, str]] = None
+        self._action_repeat_count: int = 0
+        self._cumulative_reward: float = 0.0
         self._system_state: dict[str, float] = {"stress": 0.0, "sla_breaches": 0.0}
         self._event_counter = 0
         self._spawned_email_ids: set[str] = set()
@@ -67,6 +69,8 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
             self._escalations = {}
             self._ignored = set()
             self._last_action_key = None
+            self._action_repeat_count = 0
+            self._cumulative_reward = 0.0
             self._system_state = {"stress": 0.0, "sla_breaches": 0.0}
             self._event_counter = 0
             self._spawned_email_ids = set()
@@ -98,8 +102,14 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 observation_before = self._observation()
                 loop_key = (action.action_type, action.email_id or "none")
                 if loop_key == self._last_action_key:
-                    reward_components["loop_penalty"] = EMAIL_TRIAGE_CONFIG.loop_penalty
+                    self._action_repeat_count += 1
+                    scaled_penalty = EMAIL_TRIAGE_CONFIG.loop_penalty * (
+                        1.0 + self._action_repeat_count * EMAIL_TRIAGE_CONFIG.repetition_decay
+                    )
+                    reward_components["loop_penalty"] = max(scaled_penalty, EMAIL_TRIAGE_CONFIG.reward_floor)
                     info["loop_detected"] = True
+                else:
+                    self._action_repeat_count = 0
                 self._last_action_key = loop_key
 
                 if action.action_type == "wait":
@@ -274,6 +284,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         clamped_total = max(min(raw_total, EMAIL_TRIAGE_CONFIG.reward_ceiling), EMAIL_TRIAGE_CONFIG.reward_floor)
         if abs(clamped_total - raw_total) > 1e-9:
             components["reward_clamp"] = clamped_total - raw_total
+        self._cumulative_reward += clamped_total
         return Reward(
             total=clamped_total,
             components=components,
@@ -311,47 +322,67 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         info: dict[str, Any] = {}
         resolved_cleanly = True
         if action.email_id not in self._visible_ids or action.email_id in self._completed_ids:
-            reward_components["invalid_target"] = -0.3
+            reward_components["invalid_target"] = -0.5
             info["invalid_target"] = True
             return info
 
         spec = self._email_specs[action.email_id]
         if action.action_type == "classify":
             if self._classifications.get(spec.email_id) is not None:
-                reward_components["redundant_action"] = -0.1
+                reward_components["redundant_action"] = -0.2
             self._classifications[spec.email_id] = action.category or ""
-            reward_components["classification"] = 2.0 if action.category == spec.true_category else -0.1
-            if action.category != spec.true_category:
+            if action.category == spec.true_category:
+                reward_components["classification"] = 1.0
+            elif action.category is not None and self._is_adjacent_category(action.category, spec.true_category):
+                reward_components["classification"] = 0.3
+                resolved_cleanly = False
+                self._register_mistake(spec, "misclassified")
+            elif action.category is not None and self._is_harmful_misclass(action.category, spec.true_category):
+                reward_components["classification"] = -1.0
+                resolved_cleanly = False
+                self._register_mistake(spec, "misclassified")
+            else:
+                reward_components["classification"] = -0.5
                 resolved_cleanly = False
                 self._register_mistake(spec, "misclassified")
         elif action.action_type == "respond":
             if not spec.requires_response:
-                reward_components["unnecessary_response"] = -0.05
+                reward_components["unnecessary_response"] = -0.3
                 resolved_cleanly = False
             self._responses[spec.email_id] = action.response_template or "none"
-            reward_components["response_correctness"] = (
-                2.0 if action.response_template == spec.response_template else -0.1
-            )
-            if self._step_index <= spec.response_deadline:
-                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.5
-            if action.response_template != spec.response_template:
+            if action.response_template == spec.response_template:
+                reward_components["response_correctness"] = 1.0
+            elif action.response_template in ("acknowledge", "request_info"):
+                reward_components["response_correctness"] = 0.3
+            else:
+                reward_components["response_correctness"] = -0.5
                 resolved_cleanly = False
                 self._register_mistake(spec, "wrong_response")
+            if self._step_index <= spec.response_deadline:
+                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.15
         elif action.action_type == "escalate":
             self._escalations[spec.email_id] = self._step_index
             should_escalate = spec.requires_escalation or (
                 spec.escalation_trigger_step is not None and self._step_index >= spec.escalation_trigger_step
             )
-            reward_components["escalation"] = 2.0 if should_escalate else -0.1
-            if should_escalate and self._step_index <= spec.escalation_deadline:
-                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.75
-            if not should_escalate:
+            if should_escalate:
+                reward_components["escalation"] = 1.0
+            else:
+                reward_components["escalation"] = -1.0
                 resolved_cleanly = False
                 self._register_mistake(spec, "premature_escalation")
+            if should_escalate and self._step_index <= spec.escalation_deadline:
+                reward_components["timeliness"] = reward_components.get("timeliness", 0.0) + 0.2
         elif action.action_type == "ignore":
             self._ignored.add(spec.email_id)
-            reward_components["ignore"] = 0.4 if spec.true_category == "spam" else -0.1
-            if spec.true_category != "spam":
+            if spec.true_category == "spam":
+                reward_components["ignore"] = 0.5
+            elif spec.true_category == "normal":
+                reward_components["ignore"] = -0.5
+                resolved_cleanly = False
+                self._register_mistake(spec, "ignored_important")
+            else:
+                reward_components["ignore"] = -1.0
                 resolved_cleanly = False
                 self._register_mistake(spec, "ignored_important")
 
@@ -359,8 +390,20 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         if self._is_terminal_email(spec.email_id):
             self._completed_ids.append(spec.email_id)
             if resolved_cleanly:
-                reward_components["completion"] = reward_components.get("completion", 0.0) + 0.5
+                reward_components["completion"] = reward_components.get("completion", 0.0) + 0.15
         return info
+
+    def _is_adjacent_category(self, predicted: str, actual: str) -> bool:
+        adjacent = {
+            ("normal", "urgent"), ("urgent", "normal"),
+            ("urgent", "escalation"), ("escalation", "urgent"),
+            ("normal", "escalation"), ("escalation", "normal"),
+        }
+        return (predicted, actual) in adjacent
+
+    def _is_harmful_misclass(self, predicted: str, actual: str) -> bool:
+        return (predicted == "spam" and actual in ("urgent", "escalation")) or \
+               (predicted == "normal" and actual == "escalation")
 
     def _wait_penalty(self) -> float:
         urgent_open = [
@@ -409,6 +452,12 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
     def _termination_reason(self) -> str | None:
         if self._system_state["stress"] > EMAIL_TRIAGE_CONFIG.system_collapse_stress:
             return "system_collapse"
+        if self._cumulative_reward < EMAIL_TRIAGE_CONFIG.cumulative_reward_floor:
+            return "cumulative_failure"
+        window = EMAIL_TRIAGE_CONFIG.failure_collapse_window
+        if len(self._trajectory) >= window:
+            if all(s.reward.total < 0.0 for s in self._trajectory[-window:]):
+                return "failure_collapse"
         if EMAIL_TRIAGE_CONFIG.stable_resolution_ends_episode and self._is_stably_resolved():
             return "stable_resolution"
         if self._step_index >= self.task.max_steps:
@@ -487,28 +536,28 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 self._system_state["stress"] += float(event.payload.get("stress", 0.0))
                 self._system_state["sla_breaches"] += float(event.payload.get("sla_breach", 0.0))
             elif event.event_type == "escalation":
-                reward_components["delayed_escalation"] = reward_components.get("delayed_escalation", 0.0) - 0.6
-                self._system_state["stress"] += 4.0
-                self._system_state["sla_breaches"] += 1.0
+                reward_components["delayed_escalation"] = reward_components.get("delayed_escalation", 0.0) - 0.2
+                self._system_state["stress"] += 1.5
+                self._system_state["sla_breaches"] += 0.5
             elif event.event_type == "followup_email":
                 self._spawn_followup_email(event.payload)
             elif event.event_type == "sla_breach":
                 email_id = str(event.payload["email_id"])
                 if email_id not in self._completed_ids and email_id in self._email_specs:
-                    reward_components["sla_breach"] = reward_components.get("sla_breach", 0.0) - 10.0
+                    reward_components["sla_breach"] = reward_components.get("sla_breach", 0.0) - 0.5
                     self._system_state["sla_breaches"] += 1.0
-                    self._system_state["stress"] += 15.0
+                    self._system_state["stress"] += 3.0
                     self._maybe_schedule_system_overload()
             elif event.event_type == "system_overload":
-                reward_components["system_overload"] = reward_components.get("system_overload", 0.0) - 8.0
-                self._system_state["stress"] += 20.0
+                reward_components["system_overload"] = reward_components.get("system_overload", 0.0) - 0.3
+                self._system_state["stress"] += 5.0
                 self._overload_level += 1
                 self._spawn_overload_emails()
 
         return self._engine.process_due_events(self._step_index, _handle)
 
     def _register_mistake(self, spec: EmailSpec, reason: str) -> None:
-        self._system_state["stress"] += 1.5
+        self._system_state["stress"] += 0.5
         if reason == "ignored_important":
             self._schedule_followup_email(
                 spec,
@@ -516,7 +565,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 subject_prefix="Follow-up:",
                 body_suffix="Still waiting on a response.",
             )
-            self._schedule_penalty(spec, delay=3, reason="missed_important", amount=-0.8, stress=3.0)
+            self._schedule_penalty(spec, delay=3, reason="missed_important", amount=-0.3, stress=1.0)
             self._schedule_escalation(spec, delay=5)
         elif reason == "misclassified":
             self._schedule_followup_email(
@@ -525,7 +574,7 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 subject_prefix="Correction:",
                 body_suffix="Please re-check the urgency of this issue.",
             )
-            self._schedule_penalty(spec, delay=4, reason="misclassification_fallout", amount=-0.7, stress=2.0)
+            self._schedule_penalty(spec, delay=4, reason="misclassification_fallout", amount=-0.25, stress=0.8)
         elif reason == "wrong_response":
             self._schedule_followup_email(
                 spec,
@@ -533,9 +582,9 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
                 subject_prefix="Customer reply:",
                 body_suffix="That did not address the problem.",
             )
-            self._schedule_penalty(spec, delay=3, reason="bad_response_fallout", amount=-0.6, stress=2.0)
+            self._schedule_penalty(spec, delay=3, reason="bad_response_fallout", amount=-0.2, stress=0.8)
         elif reason == "premature_escalation":
-            self._schedule_penalty(spec, delay=2, reason="false_alarm", amount=-0.5, stress=1.0)
+            self._schedule_penalty(spec, delay=2, reason="false_alarm", amount=-0.15, stress=0.5)
 
     def _schedule_penalty(self, spec: EmailSpec, delay: int, reason: str, amount: float, stress: float = 0.0) -> None:
         self._schedule_relative_event(
