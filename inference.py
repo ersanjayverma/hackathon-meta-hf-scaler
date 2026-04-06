@@ -146,14 +146,14 @@ def _build_openai_classifier(model_name: str) -> Classifier:
 
 
 def _filter_observation_for_llm(observation: Observation, env_state: dict[str, Any] | None) -> Observation:
-    """Return observation with inbox filtered to only unclassified emails."""
+    """Return observation with inbox filtered to only unhandled emails."""
     if env_state is None:
         return observation
-    classified_ids = set(env_state.get("classifications", {}).keys())
-    unclassified_inbox = [e for e in observation.inbox if e.email_id not in classified_ids]
-    if not unclassified_inbox:
-        return observation  # all classified — caller will skip LLM anyway
-    return observation.model_copy(update={"inbox": unclassified_inbox})
+    handled = _handled_email_ids(env_state)
+    unhandled_inbox = [e for e in observation.inbox if e.email_id not in handled]
+    if not unhandled_inbox:
+        return observation  # all handled — let LLM see full list to pick next action
+    return observation.model_copy(update={"inbox": unhandled_inbox})
 
 
 def _is_redundant_action(action: Action, env_state: dict[str, Any] | None) -> bool:
