@@ -214,6 +214,8 @@ Endpoints:
 - `POST /reset` -> initial observation
 - `POST /step` -> next observation, reward, done, info
 - `GET /state` -> current environment state
+- `POST /baseline` -> run deterministic heuristic baseline and return scores
+- `POST /grader` -> grade a trajectory for a given task
 
 ## Local setup
 
@@ -256,8 +258,9 @@ bash scripts/precheck.sh
 This runs:
 
 1. `pytest`
-2. `python inference.py`
-3. `docker build .`
+2. `openenv validate .`
+3. `python inference.py`
+4. `docker build .`
 
 You can also run the pieces directly:
 
