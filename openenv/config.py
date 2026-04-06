@@ -20,7 +20,7 @@ class EmailTriageConfig:
     reward_ceiling: float = 1.0
     max_reward_per_step: float = 1.0
     failure_collapse_window: int = 3
-    cumulative_reward_floor: float = -3.0
+    cumulative_reward_floor: float = -2.0
     repetition_decay: float = 0.2
 
 
