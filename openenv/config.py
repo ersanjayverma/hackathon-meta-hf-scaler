@@ -11,11 +11,13 @@ class EmailTriageConfig:
     missed_classification_penalty: float = -0.1
     missed_response_penalty: float = -0.15
     missed_escalation_penalty: float = -0.2
-    stress_penalty_scale: float = 0.1
-    sla_pressure_penalty_scale: float = 5.0
+    stress_penalty_scale: float = 0.02
+    sla_pressure_penalty_scale: float = 0.5
     system_collapse_stress: float = 100.0
-    system_collapse_penalty: float = -50.0
+    system_collapse_penalty: float = -5.0
     stable_resolution_ends_episode: bool = True
+    reward_floor: float = -5.0
+    reward_ceiling: float = 5.0
 
 
 @dataclass(frozen=True, slots=True)

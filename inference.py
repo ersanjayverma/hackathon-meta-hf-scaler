@@ -4,7 +4,6 @@ import json
 import logging
 from typing import Any, Callable
 
-from openai import OpenAI
 from pydantic import ValidationError
 
 from environments.email_triage_env import EmailTriageEnv
@@ -409,6 +408,8 @@ def _score_episode(
 
 
 def _build_openai_classifier(model_name: str) -> Classifier:
+    from openai import OpenAI
+
     # Route to the right API based on model type
     if _is_hf_model(model_name):
         # HF model -> HF router + HF_TOKEN
@@ -435,7 +436,10 @@ def _filter_observation_for_llm(observation: Observation, env_state: dict[str, A
         return observation
     handled = _handled_email_ids(env_state)
     unhandled_inbox = [e for e in observation.inbox if e.email_id not in handled]
-    return observation.model_copy(update={"inbox": unhandled_inbox})
+    if hasattr(observation, "model_copy"):
+        return observation.model_copy(update={"inbox": unhandled_inbox})
+    observation.inbox = unhandled_inbox
+    return observation
 
 
 def _is_redundant_action(action: Action, env_state: dict[str, Any] | None) -> bool:

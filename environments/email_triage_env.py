@@ -270,8 +270,12 @@ class EmailTriageEnv(BaseEnv[Observation, Action, Reward]):
         )
         if self._system_state["stress"] > EMAIL_TRIAGE_CONFIG.system_collapse_stress:
             components["system_collapse"] = EMAIL_TRIAGE_CONFIG.system_collapse_penalty
+        raw_total = sum(components.values())
+        clamped_total = max(min(raw_total, EMAIL_TRIAGE_CONFIG.reward_ceiling), EMAIL_TRIAGE_CONFIG.reward_floor)
+        if abs(clamped_total - raw_total) > 1e-9:
+            components["reward_clamp"] = clamped_total - raw_total
         return Reward(
-            total=sum(components.values()),
+            total=clamped_total,
             components=components,
             reason="dense trajectory-aware reward",
         )
