@@ -151,8 +151,6 @@ def _filter_observation_for_llm(observation: Observation, env_state: dict[str, A
         return observation
     handled = _handled_email_ids(env_state)
     unhandled_inbox = [e for e in observation.inbox if e.email_id not in handled]
-    if not unhandled_inbox:
-        return observation  # all handled — let LLM see full list to pick next action
     return observation.model_copy(update={"inbox": unhandled_inbox})
 
 
