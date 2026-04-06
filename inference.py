@@ -246,6 +246,13 @@ def _run_task(
 
             # Use env state to ensure every email gets properly classified
             env_state = env.state() if callable(getattr(env, "state", None)) else None
+
+            # If all visible emails are already handled, stop — nothing left to do
+            handled = _handled_email_ids(env_state)
+            visible_ids = {e.email_id for e in observation.inbox}
+            if visible_ids and visible_ids.issubset(handled):
+                break
+
             action, _ = _next_action(
                 observation=observation,
                 llm_classifier=llm_classifier,
