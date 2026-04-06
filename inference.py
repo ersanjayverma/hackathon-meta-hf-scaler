@@ -189,31 +189,9 @@ def _next_action(
     llm_classifier: Classifier,
     env_state: dict[str, Any] | None = None,
 ) -> tuple[Action, str | None]:
-    wait_action = Action(action_type="wait")
-    visible_email_ids = {email.email_id for email in observation.inbox}
-
-    if not visible_email_ids:
-        return wait_action, None
-
-    # Skip LLM entirely if all visible emails are already classified
-    classified_ids = set((env_state or {}).get("classifications", {}).keys())
-    unclassified = visible_email_ids - classified_ids
-    if not unclassified:
-        return wait_action, None
-
-    # Only show unclassified emails to the LLM so it can't re-pick classified ones
+    # Only show unclassified emails to the LLM to avoid redundant classifications
     filtered_obs = _filter_observation_for_llm(observation, env_state)
-    suggested_action, model_error = llm_classifier(filtered_obs)
-
-    # If LLM suggests a redundant action, wait instead of repeating
-    if _is_redundant_action(suggested_action, env_state):
-        return wait_action, model_error
-
-    if suggested_action.action_type == "wait":
-        return wait_action, model_error
-    if suggested_action.email_id is None or suggested_action.email_id not in visible_email_ids:
-        return wait_action, model_error
-    return suggested_action, model_error
+    return llm_classifier(filtered_obs)
 
 
 def _task_email_ids(task: Task) -> set[str]:
