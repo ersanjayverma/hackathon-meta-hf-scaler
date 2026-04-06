@@ -12,15 +12,13 @@ app_port: 7860
 
 # OpenEnv Email Triage Benchmark
 
-This repository is a complete OpenEnv environment for **real-world email triage**. It models the kind of inbox work handled by support, SRE, operations, and internal service teams:
+A production-grade OpenEnv environment for **real-world email triage**, powered by LLM inference. It models operational inbox work handled by support, SRE, and internal service teams:
 
 - identify spam and noise
 - acknowledge urgent incidents quickly
 - request information for routine work
 - escalate only when evidence justifies it
 - manage delayed consequences such as follow-ups, SLA breaches, overload, and system stress
-
-It is not a toy game. It is a deterministic, stateful benchmark for evaluating agents on operational triage behavior.
 
 ## Official benchmark tasks
 
@@ -35,16 +33,11 @@ The **official scored benchmark** is exactly these three canonical tasks:
 
 Only these three tasks are used by the benchmark runtime and graders.
 
-## Why this is a real-world task
+## Architecture
 
-Email triage is a practical agent-evaluation problem:
+This is an **LLM-only** system. All classification decisions are made by the configured language model (HF or OpenAI). There is no heuristic fallback in the inference path.
 
-- support desks must separate noise from actionable requests
-- incident teams must acknowledge urgent issues fast
-- escalation decisions should depend on evolving evidence, not static labels
-- mistakes create delayed fallout through follow-ups, missed deadlines, and overload
-
-That makes this environment useful for evaluating RL agents, tool-using agents, and deterministic baselines on a real operational workflow.
+The LLM receives a filtered observation (only unhandled emails) and returns a single JSON action per step. Response parsing, normalization, and validation are handled inline in [inference.py](inference.py).
 
 ## OpenEnv implementation
 
@@ -56,7 +49,7 @@ This repo implements the required OpenEnv pieces:
   - `step(Action) -> (Observation, Reward, done, info)`
   - `state() -> dict`
 - valid root manifest in [openenv.yaml](openenv.yaml)
-- canonical server entrypoint in [server/app.py](server/app.py), re-exported by [app.py](app.py) for the root container entrypoint
+- canonical server entrypoint in [server/app.py](server/app.py)
 
 ## Observation space
 
@@ -124,8 +117,6 @@ Negative signal:
 - accumulated system stress
 - system collapse
 
-This gives agents partial-progress signal while still making long-term outcomes matter.
-
 ## Delayed consequences and statefulness
 
 The environment is intentionally long-running and pressure-driven:
@@ -138,8 +129,6 @@ The environment is intentionally long-running and pressure-driven:
 - overload can spawn additional noisy urgent work
 - excessive stress ends the episode with `system_collapse`
 
-This makes the environment suitable for RL and long-horizon agent evaluation rather than single-step grading.
-
 ## Graders
 
 Canonical benchmark graders are defined in [openenv/tasks.py](openenv/tasks.py).
@@ -151,48 +140,58 @@ Properties:
 - bounded to `0.0–1.0`
 - aligned with the official benchmark tasks only
 
-`/tasks` exposes the canonical benchmark tasks and schemas.
+Use from Python:
 
-## Deterministic baseline
+```python
+from openenv.grader import grade_processed_ids
 
-The **canonical baseline** is the deterministic heuristic agent in [agents/heuristic_agent.py](agents/heuristic_agent.py).
+score = grade_processed_ids(["e-001", "e-002"], ["e-001", "e-002", "e-003"])
+```
 
-Important:
+## Inference
 
-- explicit `OPENENV_BASELINE_BACKEND` wins if set
-- otherwise, complete external env config selects `openai`
-  - `API_BASE_URL`
-  - `MODEL_NAME`
-  - `HF_TOKEN` or `OPENAI_API_KEY`
-- if that env config is incomplete, the runner falls back to internal deterministic `heuristic`
-- optional non-canonical backend: `openai`
-- additional runtime overrides are supported directly through environment variables
-  - `TASK_NAME` selects the canonical task for `inference.py`
-  - `BENCHMARK` overrides the benchmark name printed in `[START]`
-  - `MAX_STEPS` overrides the step budget
-  - `MAX_TOKENS` overrides OpenAI `max_output_tokens`
-  - `TEMPERATURE` overrides OpenAI `temperature`
-  - `SUCCESS_SCORE_THRESHOLD` overrides the final success threshold
-- fixed seeds
-- stable task ordering
-- stable JSON output format
+`inference.py` is the submission runner. It is **LLM-only** - every action decision is made by the configured language model.
 
-`inference.py` is the submission runner. By default it evaluates all three canonical tasks. Set `TASK_NAME` or `OPENENV_TASK` to run a single canonical task.
+Features:
 
-Expected canonical baseline scores:
+- auto-routes HF models (`org/name`) to HF router with `HF_TOKEN`
+- auto-routes OpenAI models (`gpt-*`) to OpenAI API with `OPENAI_API_KEY`
+- uses `max_tokens` for HF models, `max_completion_tokens` for OpenAI models
+- filters observations to only show unhandled emails to the LLM
+- stops early when all visible emails have been acted on
+- uses official graders for canonical benchmark scoring
 
-- `task_easy_classification`: `1.00`
-- `task_medium_prioritization`: `1.00`
-- `task_hard_thread_reasoning`: `1.00`
-- average canonical benchmark score: `1.00`
+Environment variables:
 
-The baseline writes a stable result file to:
+| Variable | Purpose |
+|---|---|
+| `API_BASE_URL` | HF router URL (default: `https://router.huggingface.co/v1`) |
+| `MODEL_NAME` | Model to use (e.g. `Qwen/Qwen2.5-72B-Instruct` or `gpt-5.4`) |
+| `HF_TOKEN` | Hugging Face API token |
+| `OPENAI_API_KEY` | OpenAI API key |
+| `TASK_NAME` | Run a single canonical task (optional) |
+| `MAX_STEPS` | Override step budget |
+| `MAX_TOKENS` | Override max output tokens |
+| `TEMPERATURE` | Override LLM temperature |
+| `SUCCESS_SCORE_THRESHOLD` | Override success threshold (default: 0.95) |
 
-- [baseline/results/baseline_results.json](baseline/results/baseline_results.json)
+Run:
+
+```bash
+python inference.py
+```
+
+Output protocol:
+
+```text
+[START] task=<task_name> env=<benchmark> model=<model_name>
+[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
+[END] success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...,rn>
+```
 
 ## API
 
-The canonical API is implemented in [server/app.py](server/app.py) and exposed through the root [app.py](app.py) entrypoint on port `7860`.
+The canonical API is implemented in [server/app.py](server/app.py) and exposed on port `7860`.
 
 Endpoints:
 
@@ -202,60 +201,6 @@ Endpoints:
 - `POST /reset` -> initial observation
 - `POST /step` -> next observation, reward, done, info
 - `GET /state` -> current environment state
-
-## Simple trainer and grader
-
-This repository now keeps the training and grading surface intentionally small:
-
-- one simple LLM trainer path
-- one simple deterministic grader
-
-### Simple LLM trainer
-
-Export benchmark rollouts as chat-style JSONL:
-
-```bash
-python scripts/train_llm.py --output outputs/datasets/email_triage_sft.jsonl --episodes-per-task 4
-```
-
-Each row includes:
-
-- `messages`: `system`, `user`, `assistant`
-- `metadata`: task name, difficulty, seed, step index, reward, and `done`
-
-The assistant target is always a single JSON action. That makes the dataset usable with standard chat fine-tuning pipelines without extra environment-specific tooling.
-
-Implementation:
-
-- [openenv/llm_training.py](openenv/llm_training.py)
-- [scripts/train_llm.py](scripts/train_llm.py)
-
-### Simple grader
-
-The grader is a plain completion ratio over processed email ids for the selected task:
-
-```text
-score = correct_processed_ids / total_expected_ids
-```
-
-Use it from Python:
-
-```python
-from openenv.grader import grade_processed_ids
-
-score = grade_processed_ids(["e-001", "e-002"], ["e-001", "e-002", "e-003"])
-```
-
-Or from the command line:
-
-```bash
-python scripts/grade_task.py --task-name task_easy_classification --processed-id e-001 --processed-id e-002
-```
-
-Implementation:
-
-- [openenv/grader.py](openenv/grader.py)
-- [scripts/grade_task.py](scripts/grade_task.py)
 
 ## Local setup
 
@@ -276,68 +221,20 @@ uv run server
 Submission entrypoint:
 
 ```bash
+export MODEL_NAME="Qwen/Qwen2.5-72B-Instruct"
+export HF_TOKEN="hf_..."
 python inference.py
 ```
 
-Simple LLM trainer:
+Or with OpenAI:
 
 ```bash
-python scripts/train_llm.py --output outputs/datasets/email_triage_sft.jsonl
-```
-
-This writes chat-style JSONL examples generated from deterministic heuristic rollouts. Each row contains:
-
-- `messages`: `system`, `user`, `assistant`
-- `metadata`: task, seed, step, reward, and `done`
-
-Simple grader:
-
-```bash
-python scripts/grade_task.py --task-name task_easy_classification --processed-id e-001
-```
-
-Optional OpenAI baseline mode:
-
-```bash
-export OPENENV_BASELINE_BACKEND=openai
-export API_BASE_URL="..."
-export MODEL_NAME="..."
-export HF_TOKEN="..."
-export TASK_NAME=task_hard_thread_reasoning
-export BENCHMARK=email_triage_benchmark
-export MAX_STEPS=16
-export MAX_TOKENS=256
-export TEMPERATURE=0.2
-export SUCCESS_SCORE_THRESHOLD=0.95
+export MODEL_NAME="gpt-5.4"
+export OPENAI_API_KEY="sk-..."
 python inference.py
 ```
-
-Default `inference.py` backend selection:
-
-1. `OPENENV_BASELINE_BACKEND` if explicitly set
-2. `openai` if `API_BASE_URL`, `MODEL_NAME`, and either `HF_TOKEN` or `OPENAI_API_KEY` are present
-3. otherwise internal deterministic `heuristic`
-
-`inference.py` emits the required submission line protocol:
-
-```text
-[START] task=<task_name> env=<benchmark> model=<model_name>
-[STEP] step=<n> action=<action_str> reward=<0.00> done=<true|false> error=<msg|null>
-[END] success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...,rn>
-```
-
-Notes:
-
-- default behavior: run all three canonical benchmark tasks
-- override task selection with `TASK_NAME=<canonical_task_name>`
-- `OPENENV_TASK=<canonical_task_name>` is still accepted for compatibility
-- use `MODEL_NAME`, not `MODEL`, to select the OpenAI model
-- `success` requires all task emails to be processed and the final score to meet `SUCCESS_SCORE_THRESHOLD`
-- the script prints only these line types to stdout
 
 ## Validation and tests
-
-Run the full reviewer path:
 
 ```bash
 bash scripts/precheck.sh
@@ -346,70 +243,48 @@ bash scripts/precheck.sh
 This runs:
 
 1. `pytest`
-2. `openenv validate .`
-3. `python inference.py`
-4. `docker build .`
+2. `python inference.py`
+3. `docker build .`
 
 You can also run the pieces directly:
 
 ```bash
 pytest -q
-.venv/bin/openenv validate .
 python inference.py
 docker build .
 ```
 
 ## Docker
 
-Root container definition:
-
-- [Dockerfile](Dockerfile)
+Root container definition: [Dockerfile](Dockerfile)
 
 Container behavior:
 
 - installs the package
 - exposes port `7860`
-- runs `uvicorn app:app --host 0.0.0.0 --port 7860`
-
-Example:
+- runs `uvicorn server.app:app --host 0.0.0.0 --port 7860`
 
 ```bash
 docker build -t openenv-email-triage .
 docker run -p 7860:7860 openenv-email-triage
 ```
 
-## Hugging Face Spaces deployment
-
-This repository is configured for a **Docker Space**.
-
-Reviewer-relevant files:
-
-- [README.md](README.md) front matter
-- [Dockerfile](Dockerfile)
-- [server/app.py](server/app.py)
-
-Expected runtime behavior:
-
-- app binds to port `7860`
-- `GET /` returns `200`
-- `POST /reset` returns a valid `Observation`
-
 ## Repository structure
 
-- [openenv/models.py](openenv/models.py): typed schemas
-- [openenv/tasks.py](openenv/tasks.py): canonical tasks and task loader
-- [openenv/grader.py](openenv/grader.py): simple deterministic grader
-- [openenv/llm_training.py](openenv/llm_training.py): simple LLM training data export
-- [environments/email_triage_env.py](environments/email_triage_env.py): core environment
-- [agents/heuristic_agent.py](agents/heuristic_agent.py): deterministic canonical baseline
-- [baseline/run_baseline.py](baseline/run_baseline.py): benchmark runner
-- [env/](env): trainer-facing RL adapter
-- [server/app.py](server/app.py): canonical FastAPI app
-- [scenarios/](scenarios): supplemental JSON task scenarios
-- [tests/](tests): smoke, benchmark, RL, and contract tests
-- [scripts/train_llm.py](scripts/train_llm.py): simple LLM trainer entrypoint
-- [scripts/grade_task.py](scripts/grade_task.py): simple grader entrypoint
-- [scripts/precheck.sh](scripts/precheck.sh): reviewer preflight
+- [inference.py](inference.py): LLM inference entrypoint (self-contained with parsing, normalization, and API routing)
+- [openenv/models.py](openenv/models.py): typed Pydantic schemas
+- [openenv/tasks.py](openenv/tasks.py): canonical tasks and grader mapping
+- [openenv/grader.py](openenv/grader.py): deterministic grader utilities
+- [openenv/config.py](openenv/config.py): benchmark metadata and reward config
+- [openenv/engine.py](openenv/engine.py): event queue and metrics engine
+- [openenv/base_env.py](openenv/base_env.py): abstract environment contract
+- [openenv/replay.py](openenv/replay.py): episode recording and replay
+- [openenv/logger.py](openenv/logger.py): structured JSON logging
+- [openenv/runtime_config.py](openenv/runtime_config.py): environment variable config helpers
+- [environments/email_triage_env.py](environments/email_triage_env.py): core email triage environment
+- [server/app.py](server/app.py): canonical FastAPI server
+- [tests/](tests): environment, grader, inference, API, and contract tests
+- [scripts/precheck.sh](scripts/precheck.sh): reviewer preflight script
 
 ## Quick submission checklist
 
@@ -419,10 +294,9 @@ Expected runtime behavior:
 - typed models: yes
 - valid manifest: yes
 - deterministic graders in `0.0–1.0`: yes
-- deterministic canonical baseline: yes
+- LLM-only inference: yes
 - `inference.py` at repo root: yes
 - Dockerfile at repo root: yes
-- Hugging Face Space entrypoint documented: yes
 - reviewer preflight script: yes
 
 Additional reviewer notes are in [SUBMISSION_CHECKLIST.md](SUBMISSION_CHECKLIST.md).
